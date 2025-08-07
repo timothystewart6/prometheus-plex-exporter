@@ -24,7 +24,7 @@ services:
         condition: service_healthy
   
   prom-plex:
-    image: ghcr.io/jsclayton/prometheus-plex-exporter
+    image: ghcr.io/timothystewart6/prometheus-plex-exporter
     entrypoint: /set-plex-token.sh
     environment:
       PLEX_SERVER: http://plex:32400
