@@ -2,6 +2,7 @@ package plex
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -198,7 +199,13 @@ func (p *Plex) SubscribeToNotifications(events *NotificationEvents, interrupt <-
 	skipTLSVerification := os.Getenv("SKIP_TLS_VERIFICATION") == "true"
 	dialer := *websocket.DefaultDialer // copy default
 	if skipTLSVerification {
-		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		verifyPeerCertificate := func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			return nil
+		}
+		dialer.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify:    true,
+			VerifyPeerCertificate: verifyPeerCertificate,
+		}
 	}
 
 	c, _, err := dialer.Dial(websocketURL.String(), headers)
