@@ -19,14 +19,14 @@ docker run \
   -p 9000:9000 \
   -e PLEX_SERVER="<Your Plex server URL>" \
   -e PLEX_TOKEN="<Your Plex server admin token>" \
-  ghcr.io/jsclayton/prometheus-plex-exporter
+  ghcr.io/timothystewart6/prometheus-plex-exporter
 ```
 
 Or via Docker Compose:
 
 ```yaml
 prom-plex-exporter:
-  image: ghcr.io/jsclayton/prometheus-plex-exporter
+  image: ghcr.io/timothystewart6/prometheus-plex-exporter
   ports:
     - 9000:9000/tcp
   environment:
