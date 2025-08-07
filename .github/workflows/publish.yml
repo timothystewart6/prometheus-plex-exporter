@@ -30,7 +30,7 @@ jobs:
     - name: Build and publish
       run: |
           make docker-images
-          docker push ghcr.io/jsclayton/prometheus-plex-exporter:latest
-          docker push ghcr.io/jsclayton/prometheus-plex-exporter:main
+          docker push ghcr.io/timothystewart6/prometheus-plex-exporter:latest
+          docker push ghcr.io/timothystewart6/prometheus-plex-exporter:main
       
       
