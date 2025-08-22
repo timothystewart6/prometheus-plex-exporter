@@ -9,6 +9,7 @@ type Library struct {
 
 	DurationTotal int64
 	StorageTotal  int64
+	ItemsCount    int64
 }
 
 func isLibraryDirectoryType(directoryType string) bool {
