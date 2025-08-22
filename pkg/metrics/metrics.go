@@ -59,6 +59,16 @@ var (
 		nil,
 	)
 
+	// plex_library_items is a gauge representing the instantaneous number of
+	// items contained in a library (section). Use a plain gauge (no _total)
+	// to follow Prometheus conventions for instantaneous sizes.
+	MetricsLibraryItemsDesc = prometheus.NewDesc(
+		"plex_library_items",
+		"Number of items in a library section",
+		libraryLabels,
+		nil,
+	)
+
 	MetricPlayCountDesc = prometheus.NewDesc(
 		"plays_total",
 		"Total play counts",
@@ -81,6 +91,21 @@ var (
 	MetricTransmittedBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "transmit_bytes_total",
 	}, serverLabels)
+
+	// plex_media_movies / plex_media_episodes are gauges with server-level labels
+	MetricsMediaMoviesDesc = prometheus.NewDesc(
+		"plex_media_movies",
+		"Total number of movie items across all libraries for a server",
+		serverLabels,
+		nil,
+	)
+
+	MetricsMediaEpisodesDesc = prometheus.NewDesc(
+		"plex_media_episodes",
+		"Total number of episode items across all libraries for a server",
+		serverLabels,
+		nil,
+	)
 )
 
 func Register(collectors ...prometheus.Collector) {
@@ -111,6 +136,27 @@ func LibraryStorage(value int64,
 		serverType, serverName, serverID,
 		libraryType, libraryName, libraryID,
 	)
+}
+
+func LibraryItems(value int64,
+	serverType, serverName, serverID,
+	libraryType, libraryName, libraryID string,
+) prometheus.Metric {
+
+	return prometheus.MustNewConstMetric(MetricsLibraryItemsDesc,
+		prometheus.GaugeValue,
+		float64(value),
+		serverType, serverName, serverID,
+		libraryType, libraryName, libraryID,
+	)
+}
+
+func MediaMovies(value int64, serverType, serverName, serverID string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(MetricsMediaMoviesDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
+}
+
+func MediaEpisodes(value int64, serverType, serverName, serverID string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(MetricsMediaEpisodesDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
 }
 
 func Play(value float64, serverType, serverName, serverID,

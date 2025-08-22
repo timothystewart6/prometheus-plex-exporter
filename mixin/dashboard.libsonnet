@@ -290,6 +290,31 @@ local storageStat =
     },
   };
 
+local libraryItemsStat =
+  statPanel.new(
+    'Library Items',
+    datasource='$datasource',
+    unit='short',
+    reducerFunction='max',
+    graphMode='none',
+    colorMode='background',
+  )
+  .addTarget(
+    grafana.prometheus.target(
+      'sum(plex_library_items{' + matcher + '}) by (library)',
+      legendFormat='{{library}}',
+    )
+  ) + {
+    fieldConfig+: {
+      defaults+: {
+        color: {
+          mode: 'fixed',
+          fixedColor: 'light-green',
+        },
+      },
+    },
+  };
+
 local durationGraph =
   graphPanel.new(
     'Duration',
@@ -755,7 +780,8 @@ local playback_dashboard =
     durationStat { gridPos: { h: 4, w: 15, x: 9, y: 1 } },
     plexVerStat { gridPos: { h: 4, w: 6, x: 0, y: 5 } },
     hostMemStat { gridPos: { h: 4, w: 3, x: 6, y: 5 } },
-    storageStat { gridPos: { h: 4, w: 15, x: 9, y: 5 } },
+  storageStat { gridPos: { h: 4, w: 10, x: 9, y: 5 } },
+  libraryItemsStat { gridPos: { h: 4, w: 5, x: 19, y: 5 } },
     networkTs { gridPos: { h: 7, w: 24, x: 0, y: 9 } },
     grafana.row.new('Duration') { gridPos: { h: 1, w: 24, x: 0, y: 16 } },
     durationGraph { gridPos: { h: 7, w: 24, x: 0, y: 17 } },
