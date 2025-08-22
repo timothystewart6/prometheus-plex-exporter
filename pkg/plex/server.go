@@ -8,6 +8,8 @@ import (
 
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+
+	jrplex "github.com/jrudio/go-plex-client"
 )
 
 type Server struct {
@@ -26,6 +28,8 @@ type Server struct {
 	libraries []*Library
 
 	lastBandwidthAt int
+	MovieCount      int64
+	EpisodeCount    int64
 }
 
 type StatisticsBandwidth struct {
@@ -116,17 +120,76 @@ func (s *Server) Refresh() error {
 				if !isLibraryDirectoryType(directory.Type) {
 					continue
 				}
-				s.libraries = append(s.libraries, &Library{
+				lib := &Library{
 					ID:            directory.Identifier,
 					Name:          directory.Title,
 					Type:          directory.Type,
 					DurationTotal: directory.DurationTotal,
 					StorageTotal:  directory.StorageTotal,
 					Server:        s,
-				})
+				}
+
+				// Attempt to fetch the library content to obtain an
+				// instantaneous item count. Use our local Client to GET
+				// the library sections contents and decode into the
+				// vendored SearchResults type which exposes
+				// MediaContainer.Size for the count. If the call fails
+				// we'll skip setting ItemsCount to avoid hard failures.
+				var results jrplex.SearchResults
+				path := "/library/sections/" + lib.ID + "/all"
+				if err := s.Client.Get(path, &results); err == nil {
+					lib.ItemsCount = int64(results.MediaContainer.Size)
+				}
+
+				s.libraries = append(s.libraries, lib)
 			}
 		}
 	}
+
+	// Compute server-level totals for movies and episodes.
+	// Reuse the previously fetched library ItemsCount where possible to
+	// avoid duplicate requests. For 'movie' libraries, ItemsCount already
+	// reflects the number of movies in the section (from /all). For 'show'
+	// libraries we need to query with type=4 to count episodes.
+	var moviesTotal int64
+	var episodesTotal int64
+
+	// Sum movie library counts locally (ItemsCount already fetched).
+	for _, lib := range s.libraries {
+		if lib.Type == "movie" {
+			moviesTotal += lib.ItemsCount
+		}
+	}
+
+	// For show libraries, do episode counts in parallel to reduce latency.
+	// Limit concurrency with a semaphore to avoid overloading the Plex server.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5) // max 5 concurrent requests
+	for _, lib := range s.libraries {
+		if lib.Type != "show" {
+			continue
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sectionID string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			var results jrplex.SearchResults
+			path := "/library/sections/" + sectionID + "/all?type=4"
+			if err := s.Client.Get(path, &results); err == nil {
+				mu.Lock()
+				episodesTotal += int64(results.MediaContainer.Size)
+				mu.Unlock()
+			}
+		}(lib.ID)
+	}
+	wg.Wait()
+	close(sem)
+
+	s.MovieCount = moviesTotal
+	s.EpisodeCount = episodesTotal
 
 	err = s.refreshServerInfo()
 	if err != nil {
@@ -251,6 +314,9 @@ func (s *Server) Library(id string) *Library {
 func (s *Server) Describe(ch chan<- *prometheus.Desc) {
 	ch <- metrics.MetricsLibraryDurationTotalDesc
 	ch <- metrics.MetricsLibraryStorageTotalDesc
+	ch <- metrics.MetricsLibraryItemsDesc
+	ch <- metrics.MetricsMediaMoviesDesc
+	ch <- metrics.MetricsMediaEpisodesDesc
 
 	if s.listener != nil {
 		s.listener.activeSessions.Describe(ch)
@@ -277,11 +343,24 @@ func (s *Server) Collect(ch chan<- prometheus.Metric) {
 			library.Name,
 			library.ID,
 		)
+
+		ch <- metrics.LibraryItems(library.ItemsCount,
+			"plex",
+			library.Server.Name,
+			library.Server.ID,
+			library.Type,
+			library.Name,
+			library.ID,
+		)
 	}
 
 	// HACK: Unlock prior to asking sessions to collect since it fetches
 	// 			 libraries by ID, which locks the server mutex
 	s.mtx.Unlock()
+
+	// Emit server-level media totals
+	ch <- metrics.MediaMovies(s.MovieCount, "plex", s.Name, s.ID)
+	ch <- metrics.MediaEpisodes(s.EpisodeCount, "plex", s.Name, s.ID)
 
 	if s.listener != nil {
 		s.listener.activeSessions.Collect(ch)
