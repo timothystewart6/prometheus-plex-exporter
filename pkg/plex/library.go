@@ -17,7 +17,10 @@ func isLibraryDirectoryType(directoryType string) bool {
 	case
 		"movie",
 		"show",
-		"artist":
+		"artist",
+		"music",
+		"photo",
+		"homevideo":
 		return true
 	}
 	return false

@@ -30,6 +30,9 @@ type Server struct {
 	lastBandwidthAt int
 	MovieCount      int64
 	EpisodeCount    int64
+	MusicCount      int64
+	PhotoCount      int64
+	OtherVideoCount int64
 }
 
 type StatisticsBandwidth struct {
@@ -153,11 +156,23 @@ func (s *Server) Refresh() error {
 	// libraries we need to query with type=4 to count episodes.
 	var moviesTotal int64
 	var episodesTotal int64
+	var musicTotal int64
+	var photosTotal int64
+	var otherVideosTotal int64
 
 	// Sum movie library counts locally (ItemsCount already fetched).
 	for _, lib := range s.libraries {
-		if lib.Type == "movie" {
+		switch lib.Type {
+		case "movie":
 			moviesTotal += lib.ItemsCount
+		case "music":
+			// music libraries report albums in /all; we want track counts so
+			// query type=10 (track) where necessary later. For now use ItemsCount.
+			musicTotal += lib.ItemsCount
+		case "photo":
+			photosTotal += lib.ItemsCount
+		case "homevideo":
+			otherVideosTotal += lib.ItemsCount
 		}
 	}
 
@@ -167,29 +182,51 @@ func (s *Server) Refresh() error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5) // max 5 concurrent requests
 	for _, lib := range s.libraries {
-		if lib.Type != "show" {
-			continue
+		if lib.Type == "show" {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(sectionID string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				var results jrplex.SearchResults
+				path := "/library/sections/" + sectionID + "/all?type=4"
+				if err := s.Client.Get(path, &results); err == nil {
+					mu.Lock()
+					episodesTotal += int64(results.MediaContainer.Size)
+					mu.Unlock()
+				}
+			}(lib.ID)
 		}
 
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(sectionID string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			var results jrplex.SearchResults
-			path := "/library/sections/" + sectionID + "/all?type=4"
-			if err := s.Client.Get(path, &results); err == nil {
-				mu.Lock()
-				episodesTotal += int64(results.MediaContainer.Size)
-				mu.Unlock()
-			}
-		}(lib.ID)
+		// For music, we prefer track counts (type=10). Do additional requests
+		// in parallel similar to shows.
+		if lib.Type == "music" {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(sectionID string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				var results jrplex.SearchResults
+				path := "/library/sections/" + sectionID + "/all?type=10"
+				if err := s.Client.Get(path, &results); err == nil {
+					mu.Lock()
+					musicTotal += int64(results.MediaContainer.Size)
+					mu.Unlock()
+				}
+			}(lib.ID)
+		}
+
+		// Other library types (photo, homevideo) usually have ItemsCount already
+		// populated from the initial /all call, so no extra requests are needed.
 	}
 	wg.Wait()
 	close(sem)
 
 	s.MovieCount = moviesTotal
 	s.EpisodeCount = episodesTotal
+	s.MusicCount = musicTotal
+	s.PhotoCount = photosTotal
+	s.OtherVideoCount = otherVideosTotal
 
 	err = s.refreshServerInfo()
 	if err != nil {
@@ -317,6 +354,9 @@ func (s *Server) Describe(ch chan<- *prometheus.Desc) {
 	ch <- metrics.MetricsLibraryItemsDesc
 	ch <- metrics.MetricsMediaMoviesDesc
 	ch <- metrics.MetricsMediaEpisodesDesc
+	ch <- metrics.MetricsMediaMusicDesc
+	ch <- metrics.MetricsMediaPhotosDesc
+	ch <- metrics.MetricsMediaOtherVideosDesc
 
 	if s.listener != nil {
 		s.listener.activeSessions.Describe(ch)
@@ -361,6 +401,9 @@ func (s *Server) Collect(ch chan<- prometheus.Metric) {
 	// Emit server-level media totals
 	ch <- metrics.MediaMovies(s.MovieCount, "plex", s.Name, s.ID)
 	ch <- metrics.MediaEpisodes(s.EpisodeCount, "plex", s.Name, s.ID)
+	ch <- metrics.MediaMusic(s.MusicCount, "plex", s.Name, s.ID)
+	ch <- metrics.MediaPhotos(s.PhotoCount, "plex", s.Name, s.ID)
+	ch <- metrics.MediaOtherVideos(s.OtherVideoCount, "plex", s.Name, s.ID)
 
 	if s.listener != nil {
 		s.listener.activeSessions.Collect(ch)

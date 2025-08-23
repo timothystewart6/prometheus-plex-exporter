@@ -106,6 +106,27 @@ var (
 		serverLabels,
 		nil,
 	)
+
+	MetricsMediaMusicDesc = prometheus.NewDesc(
+		"plex_media_music",
+		"Total number of music items (tracks) across all libraries for a server",
+		serverLabels,
+		nil,
+	)
+
+	MetricsMediaPhotosDesc = prometheus.NewDesc(
+		"plex_media_photos",
+		"Total number of photo items across all libraries for a server",
+		serverLabels,
+		nil,
+	)
+
+	MetricsMediaOtherVideosDesc = prometheus.NewDesc(
+		"plex_media_other_videos",
+		"Total number of other video items (home videos) across all libraries for a server",
+		serverLabels,
+		nil,
+	)
 )
 
 func Register(collectors ...prometheus.Collector) {
@@ -157,6 +178,18 @@ func MediaMovies(value int64, serverType, serverName, serverID string) prometheu
 
 func MediaEpisodes(value int64, serverType, serverName, serverID string) prometheus.Metric {
 	return prometheus.MustNewConstMetric(MetricsMediaEpisodesDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
+}
+
+func MediaMusic(value int64, serverType, serverName, serverID string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(MetricsMediaMusicDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
+}
+
+func MediaPhotos(value int64, serverType, serverName, serverID string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(MetricsMediaPhotosDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
+}
+
+func MediaOtherVideos(value int64, serverType, serverName, serverID string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(MetricsMediaOtherVideosDesc, prometheus.GaugeValue, float64(value), serverType, serverName, serverID)
 }
 
 func Play(value float64, serverType, serverName, serverID,
