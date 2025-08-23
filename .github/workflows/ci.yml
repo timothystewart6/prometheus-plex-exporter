@@ -9,6 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.0
+          cache: false
+      - run: go test -v -mod vendor ./...
+        env:
+          CGO_ENABLED: "0"
+
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -32,11 +45,6 @@ jobs:
         go-version: 1.23.0
         cache: false
     - run: go build -mod vendor -o ./bin/prometheus-plex-exporter ./cmd/prometheus-plex-exporter
-      env:
-        CGO_ENABLED: "0"
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-    - run: go test -exec=true ./...
       env:
         CGO_ENABLED: "0"
         GOOS: ${{ matrix.goos }}
