@@ -295,6 +295,7 @@ type NotificationEvents struct {
 func NewNotificationEvents() *NotificationEvents {
 	return &NotificationEvents{
 		events: map[string]func(n NotificationContainer){
+			"timeline":                  func(n NotificationContainer) {},
 			"playing":                   func(n NotificationContainer) {},
 			"reachability":              func(n NotificationContainer) {},
 			"transcode.end":             func(n NotificationContainer) {},
@@ -311,6 +312,11 @@ func NewNotificationEvents() *NotificationEvents {
 // OnPlaying shows state information (resume, stop, pause) on a user consuming media in plex
 func (e *NotificationEvents) OnPlaying(fn func(n NotificationContainer)) {
 	e.events["playing"] = fn
+}
+
+// OnTimeline registers a callback for timeline events emitted by the server.
+func (e *NotificationEvents) OnTimeline(fn func(n NotificationContainer)) {
+	e.events["timeline"] = fn
 }
 
 // OnTranscodeUpdate shows transcode information when a transcoding stream changes parameters

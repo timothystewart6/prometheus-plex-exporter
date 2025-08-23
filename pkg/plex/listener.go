@@ -104,6 +104,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 
 	events := plex.NewNotificationEvents()
 	events.OnPlaying(s.listener.onPlayingHandler)
+	events.OnTimeline(s.listener.onTimelineHandler)
 
 	// TODO - Does this automatically reconnect on websocket failure?
 	conn.SubscribeToNotifications(events, ctrlC, onError)
@@ -150,6 +151,22 @@ func (l *plexListener) onPlayingHandler(c plex.NotificationContainer) {
 			"err", err,
 		)
 	}
+}
+
+// onTimelineHandler logs concise timeline entries when a 'timeline' event is received.
+func (l *plexListener) onTimelineHandler(c plex.NotificationContainer) {
+	// Log a summary of timeline entries without passing complex structs to the
+	// log encoder. Include identifier, itemID, title, sectionID, and state.
+	if len(c.TimelineEntry) == 0 {
+		return
+	}
+
+	var summaries []string
+	for _, te := range c.TimelineEntry {
+		summaries = append(summaries, fmt.Sprintf("id=%s item=%d title=%s section=%d state=%d", te.Identifier, te.ItemID, te.Title, te.SectionID, te.State))
+	}
+
+	_ = level.Info(l.log).Log("msg", "timeline entries", "count", len(c.TimelineEntry), "entries", strings.Join(summaries, " | "))
 }
 
 func (l *plexListener) onPlaying(c plex.NotificationContainer) error {

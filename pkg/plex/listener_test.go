@@ -6,27 +6,27 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	plexv "github.com/jrudio/go-plex-client"
+	plex "github.com/jrudio/go-plex-client"
 )
 
 // fakePlex implements minimal methods used by plexListener
 type fakePlex struct{}
 
-func (f *fakePlex) GetSessions() (plexv.CurrentSessions, error) {
-	s := plexv.CurrentSessions{}
-	s.MediaContainer.Metadata = []plexv.Metadata{{
+func (f *fakePlex) GetSessions() (plex.CurrentSessions, error) {
+	s := plex.CurrentSessions{}
+	s.MediaContainer.Metadata = []plex.Metadata{{
 		SessionKey: "sess1",
-		User:       plexv.User{Title: "user1", ID: "u1"},
+		User:       plex.User{Title: "user1", ID: "u1"},
 	}, {
 		SessionKey: "sess2",
-		User:       plexv.User{Title: "user2", ID: "u2"},
+		User:       plex.User{Title: "user2", ID: "u2"},
 	}}
 	return s, nil
 }
 
-func (f *fakePlex) GetMetadata(ratingKey string) (plexv.MediaMetadata, error) {
-	mm := plexv.MediaMetadata{}
-	mm.MediaContainer.Metadata = []plexv.Metadata{{
+func (f *fakePlex) GetMetadata(ratingKey string) (plex.MediaMetadata, error) {
+	mm := plex.MediaMetadata{}
+	mm.MediaContainer.Metadata = []plex.Metadata{{
 		RatingKey: ratingKey,
 		Title:     "Episode 1",
 	}}
@@ -47,8 +47,8 @@ func TestOnPlayingUpdatesSessions(t *testing.T) {
 	}
 
 	// craft a notification container with one playing notification
-	c := plexv.NotificationContainer{}
-	c.PlaySessionStateNotification = []plexv.PlaySessionStateNotification{{
+	c := plex.NotificationContainer{}
+	c.PlaySessionStateNotification = []plex.PlaySessionStateNotification{{
 		SessionKey: "sess1",
 		RatingKey:  "rk1",
 		State:      "playing",
@@ -94,8 +94,8 @@ func TestOnPlayingLogsFirstNotification(t *testing.T) {
 	}
 
 	// craft a notification container with two playing notifications
-	c := plexv.NotificationContainer{}
-	c.PlaySessionStateNotification = []plexv.PlaySessionStateNotification{{
+	c := plex.NotificationContainer{}
+	c.PlaySessionStateNotification = []plex.PlaySessionStateNotification{{
 		SessionKey: "sess1",
 		RatingKey:  "rk1",
 		State:      "playing",
@@ -122,5 +122,50 @@ func TestOnPlayingLogsFirstNotification(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(out), []byte("batchCount=2")) {
 		t.Fatalf("expected batchCount=2 in log, got: %s", out)
+	}
+}
+
+func TestOnTimelineLogsEntries(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	var buf bytes.Buffer
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
+
+	l := &plexListener{
+		server:         s,
+		conn:           &fakePlex{},
+		activeSessions: &sessions{sessions: map[string]session{}, server: s},
+		log:            logger,
+	}
+
+	// craft a notification container with two timeline entries
+	c := plex.NotificationContainer{}
+	c.TimelineEntry = []plex.TimelineEntry{{
+		Identifier: "id1",
+		ItemID:     123,
+		Title:      "Test1",
+		SectionID:  15,
+		State:      2,
+	}, {
+		Identifier: "id2",
+		ItemID:     124,
+		Title:      "Test2",
+		SectionID:  15,
+		State:      3,
+	}}
+
+	// our handler expects the vendored NotificationContainer type used by
+	// the websocket client; convert and call the handler.
+	l.onTimelineHandler(c)
+
+	out := buf.String()
+	if out == "" {
+		t.Fatalf("expected log output, got empty string")
+	}
+
+	if !bytes.Contains([]byte(out), []byte("timeline entries")) {
+		t.Fatalf("expected timeline entries in log, got: %s", out)
+	}
+	if !bytes.Contains([]byte(out), []byte("id=id1")) {
+		t.Fatalf("expected id=id1 in log, got: %s", out)
 	}
 }
