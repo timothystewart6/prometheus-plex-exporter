@@ -58,18 +58,3 @@ metrics:
           username: <Your Metrics instance ID>
           password: <Your Grafana.com API Key>
 ```
-
-## New metrics
-
-
-This release adds per-library and server-level media counts:
-
-- `plex_library_items` (gauge): instantaneous item count per library. Labels: `server_type`, `server`, `server_id`, `library_type`, `library`, `library_id`.
-- `plex_media_movies` (gauge): total number of movies across all movie libraries. Labels: `server_type`, `server`, `server_id`.
-- `plex_media_episodes` (gauge): total number of episodes across all show libraries. Labels: `server_type`, `server`, `server_id`.
-
-Notes:
-
-- Counts are best-effort and are fetched from the Plex library endpoints. If the exporter cannot reach the Plex server for a particular library, that library's count will be omitted for that refresh cycle.
-- Episode counting for show libraries uses a filtered Plex query (`?type=4`) and the exporter performs those calls in parallel with a small concurrency limit to avoid overloading the Plex server.
-- Example Grafana panels showing these metrics are included under `examples/dashboards/Media Server.json` and the mixin at `mixin/dashboard.libsonnet`.
