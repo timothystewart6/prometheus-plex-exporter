@@ -31,19 +31,19 @@ func main() {
 
 	serverAddress := os.Getenv("PLEX_SERVER")
 	if serverAddress == "" {
-		level.Error(log).Log("msg", "PLEX_SERVER environment variable must be specified")
+		_ = level.Error(log).Log("msg", "PLEX_SERVER environment variable must be specified")
 		os.Exit(1)
 	}
 
 	plexToken := os.Getenv("PLEX_TOKEN")
 	if plexToken == "" {
-		level.Error(log).Log("msg", "PLEX_TOKEN environment variable must be specified")
+		_ = level.Error(log).Log("msg", "PLEX_TOKEN environment variable must be specified")
 		os.Exit(1)
 	}
 
 	server, err := plex.NewServer(serverAddress, plexToken)
 	if err != nil {
-		level.Error(log).Log("msg", "cannot initialize connection to plex server", "error", err)
+		_ = level.Error(log).Log("msg", "cannot initialize connection to plex server", "error", err)
 		os.Exit(1)
 	}
 
@@ -60,25 +60,25 @@ func main() {
 	}
 
 	go func() {
-		level.Info(log).Log("msg", "starting metrics server on "+MetricsServerAddr)
+		_ = level.Info(log).Log("msg", "starting metrics server on "+MetricsServerAddr)
 		err = metricsServer.ListenAndServe()
 		if !errors.Is(err, http.ErrServerClosed) {
-			level.Error(log).Log("msg", "cannot start metrics server", "error", err)
+			_ = level.Error(log).Log("msg", "cannot start metrics server", "error", err)
 		}
 	}()
 
 	exitCode := 0
 	err = server.Listen(ctx, log)
 	if err != nil {
-		level.Error(log).Log("msg", "cannot listen to plex server events", "error", err)
+		_ = level.Error(log).Log("msg", "cannot listen to plex server events", "error", err)
 		exitCode = 1
 	}
 
-	level.Debug(log).Log("msg", "shutting down metrics server")
+	_ = level.Debug(log).Log("msg", "shutting down metrics server")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-		level.Error(log).Log("msg", "cannot gracefully shutdown metrics server", "error", err)
+		_ = level.Error(log).Log("msg", "cannot gracefully shutdown metrics server", "error", err)
 	}
 
 	os.Exit(exitCode)

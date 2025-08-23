@@ -2,7 +2,7 @@ package plex
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -58,7 +58,7 @@ func (f *fakeTotalsRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	resp := &http.Response{
 		StatusCode: 200,
 		Status:     "200 OK",
-		Body:       ioutil.NopCloser(bytes.NewBufferString(body)),
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
 		Header:     make(http.Header),
 		Request:    req,
 	}

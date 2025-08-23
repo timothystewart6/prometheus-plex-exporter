@@ -2,7 +2,7 @@ package plex
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -16,18 +16,18 @@ type fakeRoundTripper struct{}
 
 func (f *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	var body string
-	switch {
-	case req.URL.Path == "/media/providers":
+	switch req.URL.Path {
+	case "/media/providers":
 		body = `{"MediaContainer": {"friendlyName":"TestServer","machineIdentifier":"machine123","version":"1.2.3","MediaProvider":[{"identifier":"com.plexapp.plugins.library","Feature":[{"type":"content","Directory":[{"id":"1","durationTotal":1000,"storageTotal":2000,"title":"Movies","type":"movie"},{"id":"2","durationTotal":2000,"storageTotal":3000,"title":"Shows","type":"show"}]}]}]}}`
-	case req.URL.Path == "/library/sections/1/all":
+	case "/library/sections/1/all":
 		body = `{"MediaContainer":{"size":10}}`
-	case req.URL.Path == "/library/sections/2/all":
+	case "/library/sections/2/all":
 		body = `{"MediaContainer":{"size":20}}`
-	case req.URL.Path == "/":
+	case "/":
 		body = `{"MediaContainer":{"version":"v","platform":"p","platformVersion":"pv"}}`
-	case req.URL.Path == "/statistics/resources":
+	case "/statistics/resources":
 		body = `{"MediaContainer":{"StatisticsResources":[{"at":1,"hostCpuUtilization":5,"hostMemoryUtilization":6}]}}`
-	case req.URL.Path == "/statistics/bandwidth":
+	case "/statistics/bandwidth":
 		body = `{"MediaContainer":{"StatisticsBandwith":[]}}`
 	default:
 		body = `{"MediaContainer":{}}`
@@ -36,7 +36,7 @@ func (f *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	resp := &http.Response{
 		StatusCode: 200,
 		Status:     "200 OK",
-		Body:       ioutil.NopCloser(bytes.NewBufferString(body)),
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
 		Header:     make(http.Header),
 		Request:    req,
 	}

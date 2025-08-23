@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -76,7 +77,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 				return
 			}
 		}
-		level.Error(log).Log("msg", "error in websocket processing", "err", err)
+		_ = level.Error(log).Log("msg", "error in websocket processing", "err", err)
 		doneChan <- err
 	}
 
@@ -92,7 +93,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 		// noop
 	}
 
-	level.Info(log).Log("msg", "Successfully connected", "machineID", s.ID, "server", s.Name)
+	_ = level.Info(log).Log("msg", "Successfully connected", "machineID", s.ID, "server", s.Name)
 
 	return <-doneChan
 }
@@ -109,7 +110,24 @@ func getSessionByID(sessions plex.CurrentSessions, sessionID string) *plex.Metad
 func (l *plexListener) onPlayingHandler(c plex.NotificationContainer) {
 	err := l.onPlaying(c)
 	if err != nil {
-		level.Error(l.log).Log("msg", "error handling OnPlaying event", "event", c, "err", err)
+		// Extract simple fields for structured logging so the logfmt encoder
+		// doesn't attempt to serialize complex nested structs.
+		var sessionKeys []string
+		var ratingKeys []string
+		var states []string
+		for _, n := range c.PlaySessionStateNotification {
+			sessionKeys = append(sessionKeys, n.SessionKey)
+			ratingKeys = append(ratingKeys, n.RatingKey)
+			states = append(states, n.State)
+		}
+
+		_ = level.Error(l.log).Log(
+			"msg", "error handling OnPlaying event",
+			"sessionKeys", strings.Join(sessionKeys, ","),
+			"ratingKeys", strings.Join(ratingKeys, ","),
+			"states", strings.Join(states, ","),
+			"err", err,
+		)
 	}
 }
 
@@ -119,7 +137,7 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		return fmt.Errorf("error fetching sessions: %w", err)
 	}
 
-	for _, n := range c.PlaySessionStateNotification {
+	for i, n := range c.PlaySessionStateNotification {
 		if sessionState(n.State) == stateStopped {
 			// When the session is stopped we can't look up the user info or media anymore.
 			l.activeSessions.Update(n.SessionKey, sessionState(n.State), nil, nil)
@@ -136,14 +154,21 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 			return fmt.Errorf("error fetching metadata for key %s: %w", n.RatingKey, err)
 		}
 
-		level.Info(l.log).Log("msg", "Received PlaySessionStateNotification",
-			"SessionKey", n.SessionKey,
-			"userName", session.User.Title,
-			"userID", session.User.ID,
-			"state", n.State,
-			"mediaTitle", metadata.MediaContainer.Metadata[0].Title,
-			"mediaID", metadata.MediaContainer.Metadata[0].RatingKey,
-			"timestamp", time.Duration(time.Millisecond)*time.Duration(n.ViewOffset))
+		// Log only the first notification in the batch to keep logs concise
+		// and structured. Always update sessions for every notification.
+		if i == 0 {
+			batchCount := len(c.PlaySessionStateNotification)
+			_ = level.Info(l.log).Log("msg", "Received PlaySessionStateNotification",
+				"SessionKey", n.SessionKey,
+				"userName", session.User.Title,
+				"userID", session.User.ID,
+				"state", n.State,
+				"mediaTitle", metadata.MediaContainer.Metadata[0].Title,
+				"mediaID", metadata.MediaContainer.Metadata[0].RatingKey,
+				"timestamp", time.Duration(time.Millisecond)*time.Duration(n.ViewOffset),
+				"batchCount", batchCount,
+			)
+		}
 
 		l.activeSessions.Update(n.SessionKey, sessionState(n.State), session, &metadata.MediaContainer.Metadata[0])
 	}
