@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,6 +24,72 @@ type TimelineEntry struct {
 	UpdatedAt     int64  `json:"updatedAt"`
 }
 
+// parseFlexibleInt64 accepts JSON bytes that may encode an integer as a number or as a quoted string.
+func parseFlexibleInt64(b []byte) (int64, error) {
+	if string(b) == "null" || len(b) == 0 {
+		return 0, nil
+	}
+
+	var asNum json.Number
+	if err := json.Unmarshal(b, &asNum); err == nil {
+		if i, err := asNum.Int64(); err == nil {
+			return i, nil
+		}
+		if f, err := asNum.Float64(); err == nil {
+			return int64(f), nil
+		}
+	}
+
+	var asStr string
+	if err := json.Unmarshal(b, &asStr); err == nil {
+		if asStr == "" {
+			return 0, nil
+		}
+		if i, err := strconv.ParseInt(asStr, 10, 64); err == nil {
+			return i, nil
+		}
+		if f, err := strconv.ParseFloat(asStr, 64); err == nil {
+			return int64(f), nil
+		}
+	}
+
+	return 0, fmt.Errorf("invalid int64 value: %s", string(b))
+}
+
+// UnmarshalJSON for TimelineEntry accepts both numeric and string-encoded sectionID values.
+func (t *TimelineEntry) UnmarshalJSON(b []byte) error {
+	// Create an alias to avoid recursion
+	type alias TimelineEntry
+	var aux struct {
+		ItemID    json.RawMessage `json:"itemID"`
+		SectionID json.RawMessage `json:"sectionID"`
+		alias
+	}
+
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+
+	// Default assign other fields
+	*t = TimelineEntry(aux.alias)
+
+	// Parse itemID
+	if v, err := parseFlexibleInt64(aux.ItemID); err == nil {
+		t.ItemID = v
+	} else {
+		return fmt.Errorf("invalid itemID: %w", err)
+	}
+
+	// Parse sectionID
+	if v, err := parseFlexibleInt64(aux.SectionID); err == nil {
+		t.SectionID = v
+	} else {
+		return fmt.Errorf("invalid sectionID: %w", err)
+	}
+
+	return nil
+}
+
 // ActivityNotification ...
 type ActivityNotification struct {
 	Activity struct {
@@ -36,6 +103,31 @@ type ActivityNotification struct {
 	} `json:"Activity"`
 	Event string `json:"event"`
 	UUID  string `json:"uuid"`
+}
+
+// UnmarshalJSON for ActivityNotification parses numeric-or-string userID.
+func (a *ActivityNotification) UnmarshalJSON(b []byte) error {
+	type alias ActivityNotification
+	var aux struct {
+		Activity struct {
+			UserID json.RawMessage `json:"userID"`
+		} `json:"Activity"`
+		alias
+	}
+
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+
+	*a = ActivityNotification(aux.alias)
+
+	if v, err := parseFlexibleInt64(aux.Activity.UserID); err == nil {
+		a.Activity.UserID = v
+	} else {
+		return fmt.Errorf("invalid Activity.userID: %w", err)
+	}
+
+	return nil
 }
 
 // StatusNotification ...
@@ -58,6 +150,36 @@ type PlaySessionStateNotification struct {
 	TranscodeSession string `json:"transcodeSession"`
 }
 
+// UnmarshalJSON parses playQueueItemID and viewOffset as flexible ints.
+func (p *PlaySessionStateNotification) UnmarshalJSON(b []byte) error {
+	type alias PlaySessionStateNotification
+	var aux struct {
+		PlayQueueItemID json.RawMessage `json:"playQueueItemID"`
+		ViewOffset      json.RawMessage `json:"viewOffset"`
+		alias
+	}
+
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+
+	*p = PlaySessionStateNotification(aux.alias)
+
+	if v, err := parseFlexibleInt64(aux.PlayQueueItemID); err == nil {
+		p.PlayQueueItemID = v
+	} else {
+		return fmt.Errorf("invalid playQueueItemID: %w", err)
+	}
+
+	if v, err := parseFlexibleInt64(aux.ViewOffset); err == nil {
+		p.ViewOffset = v
+	} else {
+		return fmt.Errorf("invalid viewOffset: %w", err)
+	}
+
+	return nil
+}
+
 // ReachabilityNotification ...
 type ReachabilityNotification struct {
 	Reachability bool `json:"reachability"`
@@ -67,6 +189,29 @@ type ReachabilityNotification struct {
 type BackgroundProcessingQueueEventNotification struct {
 	Event   string `json:"event"`
 	QueueID int64  `json:"queueID"`
+}
+
+// UnmarshalJSON parses queueID as flexible int.
+func (bq *BackgroundProcessingQueueEventNotification) UnmarshalJSON(b []byte) error {
+	type alias BackgroundProcessingQueueEventNotification
+	var aux struct {
+		QueueID json.RawMessage `json:"queueID"`
+		alias
+	}
+
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+
+	*bq = BackgroundProcessingQueueEventNotification(aux.alias)
+
+	if v, err := parseFlexibleInt64(aux.QueueID); err == nil {
+		bq.QueueID = v
+	} else {
+		return fmt.Errorf("invalid queueID: %w", err)
+	}
+
+	return nil
 }
 
 // TranscodeSession ...
