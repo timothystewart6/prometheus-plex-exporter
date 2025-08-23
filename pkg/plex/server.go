@@ -71,7 +71,7 @@ func NewServer(serverURL, token string) (*Server, error) {
 	ticker := time.NewTicker(time.Second * 5)
 	go func() {
 		for range ticker.C {
-			server.Refresh()
+			_ = server.Refresh()
 		}
 	}()
 
