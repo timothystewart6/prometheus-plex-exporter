@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jrudio/go-plex-client"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/timothystewart6/go-plex-client"
 
 	"github.com/grafana/plexporter/pkg/metrics"
 )

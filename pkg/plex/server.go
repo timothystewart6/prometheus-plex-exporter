@@ -9,7 +9,7 @@ import (
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 type Server struct {
@@ -129,7 +129,7 @@ func (s *Server) Refresh() error {
 					Server:        s,
 				}
 
-				var results jrplex.SearchResults
+				var results ttPlex.SearchResults
 				path := "/library/sections/" + lib.ID + "/all"
 				if err := s.Client.Get(path, &results); err == nil {
 					lib.ItemsCount = int64(results.MediaContainer.Size)
@@ -171,7 +171,7 @@ func (s *Server) Refresh() error {
 			go func(sectionID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				var results jrplex.SearchResults
+				var results ttPlex.SearchResults
 				path := "/library/sections/" + sectionID + "/all?type=4"
 				if err := s.Client.Get(path, &results); err == nil {
 					mu.Lock()
@@ -187,7 +187,7 @@ func (s *Server) Refresh() error {
 			go func(sectionID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				var results jrplex.SearchResults
+				var results ttPlex.SearchResults
 				path := "/library/sections/" + sectionID + "/all?type=10"
 				if err := s.Client.Get(path, &results); err == nil {
 					mu.Lock()

@@ -51,6 +51,8 @@ func parseFlexibleInt64(b []byte) (int64, error) {
 		if f, err := strconv.ParseFloat(asStr, 64); err == nil {
 			return int64(f), nil
 		}
+		// For non-numeric strings, default to 0 for robustness
+		return 0, nil
 	}
 
 	return 0, fmt.Errorf("invalid int64 value: %s", string(b))

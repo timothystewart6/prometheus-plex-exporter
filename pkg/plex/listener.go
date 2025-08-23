@@ -12,7 +12,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gorilla/websocket"
-	"github.com/jrudio/go-plex-client"
+	"github.com/timothystewart6/go-plex-client"
 )
 
 var (
@@ -84,7 +84,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 
 	s.mtx.Unlock()
 
-	// forward context completion to jrudio/go-plex-client
+	// forward context completion to timothystewart6/go-plex-client
 	ctrlC := make(chan os.Signal, 1)
 	go func() {
 		<-ctx.Done()
