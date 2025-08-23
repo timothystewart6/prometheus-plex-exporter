@@ -1,6 +1,7 @@
 package plex
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ func (f *fakePlex) GetSessions() (plexv.CurrentSessions, error) {
 	s.MediaContainer.Metadata = []plexv.Metadata{{
 		SessionKey: "sess1",
 		User:       plexv.User{Title: "user1", ID: "u1"},
+	}, {
+		SessionKey: "sess2",
+		User:       plexv.User{Title: "user2", ID: "u2"},
 	}}
 	return s, nil
 }
@@ -73,5 +77,50 @@ func TestOnPlayingUpdatesSessions(t *testing.T) {
 	l.activeSessions.pruneOldSessions()
 	if _, ok := l.activeSessions.sessions["sess1"]; ok {
 		t.Fatalf("expected session sess1 to be pruned")
+	}
+}
+
+func TestOnPlayingLogsFirstNotification(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	// capture logs in a buffer
+	var buf bytes.Buffer
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
+
+	l := &plexListener{
+		server:         s,
+		conn:           &fakePlex{},
+		activeSessions: &sessions{sessions: map[string]session{}, server: s},
+		log:            logger,
+	}
+
+	// craft a notification container with two playing notifications
+	c := plexv.NotificationContainer{}
+	c.PlaySessionStateNotification = []plexv.PlaySessionStateNotification{{
+		SessionKey: "sess1",
+		RatingKey:  "rk1",
+		State:      "playing",
+		ViewOffset: 1000,
+	}, {
+		SessionKey: "sess2",
+		RatingKey:  "rk2",
+		State:      "playing",
+		ViewOffset: 2000,
+	}}
+
+	if err := l.onPlaying(c); err != nil {
+		t.Fatalf("onPlaying error: %v", err)
+	}
+
+	out := buf.String()
+	if out == "" {
+		t.Fatalf("expected log output, got empty string")
+	}
+
+	// Ensure the first session key and batchCount=2 are present in the log
+	if !bytes.Contains([]byte(out), []byte("SessionKey=sess1")) {
+		t.Fatalf("expected SessionKey=sess1 in log, got: %s", out)
+	}
+	if !bytes.Contains([]byte(out), []byte("batchCount=2")) {
+		t.Fatalf("expected batchCount=2 in log, got: %s", out)
 	}
 }

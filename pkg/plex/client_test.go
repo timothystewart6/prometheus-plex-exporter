@@ -2,7 +2,7 @@ package plex
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -17,7 +17,7 @@ func (s *simpleRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp := &http.Response{
 		StatusCode: s.status,
 		Status:     "OK",
-		Body:       ioutil.NopCloser(bytes.NewBufferString(s.body)),
+		Body:       io.NopCloser(bytes.NewBufferString(s.body)),
 		Header:     make(http.Header),
 		Request:    req,
 	}
