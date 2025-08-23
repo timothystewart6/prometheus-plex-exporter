@@ -15,11 +15,11 @@ func TestTimelineEntryQuotedIDs(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if len(notif.NotificationContainer.TimelineEntry) != 1 {
-		t.Fatalf("expected 1 timeline entry, got %d", len(notif.NotificationContainer.TimelineEntry))
+	if len(notif.TimelineEntry) != 1 {
+		t.Fatalf("expected 1 timeline entry, got %d", len(notif.TimelineEntry))
 	}
 
-	te := notif.NotificationContainer.TimelineEntry[0]
+	te := notif.TimelineEntry[0]
 	if te.ItemID != 123 {
 		t.Fatalf("expected ItemID 123, got %d", te.ItemID)
 	}
@@ -36,11 +36,11 @@ func TestActivityNotificationQuotedUserID(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if len(notif.NotificationContainer.ActivityNotification) != 1 {
-		t.Fatalf("expected 1 activity entry, got %d", len(notif.NotificationContainer.ActivityNotification))
+	if len(notif.ActivityNotification) != 1 {
+		t.Fatalf("expected 1 activity entry, got %d", len(notif.ActivityNotification))
 	}
 
-	act := notif.NotificationContainer.ActivityNotification[0]
+	act := notif.ActivityNotification[0]
 	if act.Activity.UserID != 42 {
 		t.Fatalf("expected Activity.UserID 42, got %d", act.Activity.UserID)
 	}
@@ -54,11 +54,11 @@ func TestPlaySessionStateNotificationQuotedIDs(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if len(notif.NotificationContainer.PlaySessionStateNotification) != 1 {
-		t.Fatalf("expected 1 play session entry, got %d", len(notif.NotificationContainer.PlaySessionStateNotification))
+	if len(notif.PlaySessionStateNotification) != 1 {
+		t.Fatalf("expected 1 play session entry, got %d", len(notif.PlaySessionStateNotification))
 	}
 
-	ps := notif.NotificationContainer.PlaySessionStateNotification[0]
+	ps := notif.PlaySessionStateNotification[0]
 	if ps.PlayQueueItemID != 7 {
 		t.Fatalf("expected PlayQueueItemID 7, got %d", ps.PlayQueueItemID)
 	}

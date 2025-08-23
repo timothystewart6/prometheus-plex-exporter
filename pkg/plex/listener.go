@@ -146,12 +146,30 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 
 		session := getSessionByID(sessions, n.SessionKey)
 		if session == nil {
-			return fmt.Errorf("error getting session with key %s %+v", n.SessionKey, n)
+			// Sessions can be slightly out of date relative to notifications.
+			// Try one quick retry to reduce spurious errors.
+			if s2, err := l.conn.GetSessions(); err == nil {
+				session = getSessionByID(s2, n.SessionKey)
+			}
+		}
+
+		if session == nil {
+			// Still not found; log and skip this notification instead of
+			// returning an error which would abort processing of remaining
+			// notifications in the batch.
+			_ = level.Warn(l.log).Log("msg", "session not found for notification, skipping", "SessionKey", n.SessionKey, "RatingKey", n.RatingKey, "state", n.State)
+			continue
 		}
 
 		metadata, err := l.conn.GetMetadata(n.RatingKey)
 		if err != nil {
-			return fmt.Errorf("error fetching metadata for key %s: %w", n.RatingKey, err)
+			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification, skipping", "RatingKey", n.RatingKey, "err", err)
+			continue
+		}
+
+		if len(metadata.MediaContainer.Metadata) == 0 {
+			_ = level.Warn(l.log).Log("msg", "metadata response empty, skipping", "RatingKey", n.RatingKey)
+			continue
 		}
 
 		// Log only the first notification in the batch to keep logs concise

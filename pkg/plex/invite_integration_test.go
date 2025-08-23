@@ -25,7 +25,9 @@ func TestInviteFriendEndToEnd(t *testing.T) {
 
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"1","ownerId":"2","invitedId":"3","serverId":"4","numLibraries":"0","invited":{"id":"5"},"sharingSettings":{"allowTuners":"0"},"libraries":[]}`))
+		if _, err := w.Write([]byte(`{"id":"1","ownerId":"2","invitedId":"3","serverId":"4","numLibraries":"0","invited":{"id":"5"},"sharingSettings":{"allowTuners":"0"},"libraries":[]}`)); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
