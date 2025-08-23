@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// FlexibleInt64 handles JSON values that may be numbers or quoted strings.
+type FlexibleInt64 int64
+
+func (f *FlexibleInt64) UnmarshalJSON(b []byte) error {
+	v, err := parseFlexibleInt64(b)
+	if err != nil {
+		return err
+	}
+	*f = FlexibleInt64(v)
+	return nil
+}
+
+func (f FlexibleInt64) Int64() int64 { return int64(f) }
+
 // Plex contains fields that are required to make
 // an api call to your plex server
 type Plex struct {
@@ -42,51 +56,51 @@ type SearchResults struct {
 
 // Metadata ...
 type Metadata struct {
-	Player                Player       `json:"Player"`
-	Session               Session      `json:"Session"`
-	User                  User         `json:"User"`
-	AddedAt               int          `json:"addedAt"`
-	Art                   string       `json:"art"`
-	ContentRating         string       `json:"contentRating"`
-	Duration              int          `json:"duration"`
-	Genres                []Genre      `json:"Genre"`
-	GrandparentArt        string       `json:"grandparentArt"`
-	GrandparentKey        string       `json:"grandparentKey"`
-	GrandparentRatingKey  string       `json:"grandparentRatingKey"`
-	GrandparentTheme      string       `json:"grandparentTheme"`
-	GrandparentThumb      string       `json:"grandparentThumb"`
-	GrandparentTitle      string       `json:"grandparentTitle"`
-	GUID                  string       `json:"guid"`
-	AltGUIDs              []AltGUID    `json:"Guid"`
-	Index                 int64        `json:"index"`
-	Key                   string       `json:"key"`
-	LastViewedAt          int          `json:"lastViewedAt"`
-	LibrarySectionID      json.Number  `json:"librarySectionID"`
-	LibrarySectionKey     string       `json:"librarySectionKey"`
-	LibrarySectionTitle   string       `json:"librarySectionTitle"`
-	OriginallyAvailableAt string       `json:"originallyAvailableAt"`
-	ParentIndex           int64        `json:"parentIndex"`
-	ParentKey             string       `json:"parentKey"`
-	ParentRatingKey       string       `json:"parentRatingKey"`
-	ParentThumb           string       `json:"parentThumb"`
-	ParentTitle           string       `json:"parentTitle"`
-	RatingCount           int          `json:"ratingCount"`
-	Rating                float64      `json:"rating"`
-	Ratings               []Rating     `json:"Rating"`
-	RatingKey             string       `json:"ratingKey"`
-	SessionKey            string       `json:"sessionKey"`
-	Summary               string       `json:"summary"`
-	Thumb                 string       `json:"thumb"`
-	Media                 []Media      `json:"Media"`
-	Title                 string       `json:"title"`
-	TitleSort             string       `json:"titleSort"`
-	Type                  string       `json:"type"`
-	UpdatedAt             int          `json:"updatedAt"`
-	ViewCount             json.Number  `json:"viewCount"`
-	ViewOffset            int          `json:"viewOffset"`
-	Year                  int          `json:"year"`
-	Director              []TaggedData `json:"Director"`
-	Writer                []TaggedData `json:"Writer"`
+	Player                Player        `json:"Player"`
+	Session               Session       `json:"Session"`
+	User                  User          `json:"User"`
+	AddedAt               int           `json:"addedAt"`
+	Art                   string        `json:"art"`
+	ContentRating         string        `json:"contentRating"`
+	Duration              int           `json:"duration"`
+	Genres                []Genre       `json:"Genre"`
+	GrandparentArt        string        `json:"grandparentArt"`
+	GrandparentKey        string        `json:"grandparentKey"`
+	GrandparentRatingKey  string        `json:"grandparentRatingKey"`
+	GrandparentTheme      string        `json:"grandparentTheme"`
+	GrandparentThumb      string        `json:"grandparentThumb"`
+	GrandparentTitle      string        `json:"grandparentTitle"`
+	GUID                  string        `json:"guid"`
+	AltGUIDs              []AltGUID     `json:"Guid"`
+	Index                 int64         `json:"index"`
+	Key                   string        `json:"key"`
+	LastViewedAt          int           `json:"lastViewedAt"`
+	LibrarySectionID      FlexibleInt64 `json:"librarySectionID"`
+	LibrarySectionKey     string        `json:"librarySectionKey"`
+	LibrarySectionTitle   string        `json:"librarySectionTitle"`
+	OriginallyAvailableAt string        `json:"originallyAvailableAt"`
+	ParentIndex           int64         `json:"parentIndex"`
+	ParentKey             string        `json:"parentKey"`
+	ParentRatingKey       string        `json:"parentRatingKey"`
+	ParentThumb           string        `json:"parentThumb"`
+	ParentTitle           string        `json:"parentTitle"`
+	RatingCount           int           `json:"ratingCount"`
+	Rating                float64       `json:"rating"`
+	Ratings               []Rating      `json:"Rating"`
+	RatingKey             string        `json:"ratingKey"`
+	SessionKey            string        `json:"sessionKey"`
+	Summary               string        `json:"summary"`
+	Thumb                 string        `json:"thumb"`
+	Media                 []Media       `json:"Media"`
+	Title                 string        `json:"title"`
+	TitleSort             string        `json:"titleSort"`
+	Type                  string        `json:"type"`
+	UpdatedAt             int           `json:"updatedAt"`
+	ViewCount             FlexibleInt64 `json:"viewCount"`
+	ViewOffset            int           `json:"viewOffset"`
+	Year                  int           `json:"year"`
+	Director              []TaggedData  `json:"Director"`
+	Writer                []TaggedData  `json:"Writer"`
 }
 
 // AltGUID represents a Globally Unique Identifier for a metadata provider that is not actively being used.
@@ -127,24 +141,24 @@ func (b *boolOrInt) UnmarshalJSON(data []byte) error {
 
 // Media media info
 type Media struct {
-	AspectRatio           json.Number `json:"aspectRatio"`
-	AudioChannels         int         `json:"audioChannels"`
-	AudioCodec            string      `json:"audioCodec"`
-	AudioProfile          string      `json:"audioProfile"`
-	Bitrate               int         `json:"bitrate"`
-	Container             string      `json:"container"`
-	Duration              int         `json:"duration"`
-	Has64bitOffsets       bool        `json:"has64bitOffsets"`
-	Height                int         `json:"height"`
-	ID                    json.Number `json:"id"`
-	OptimizedForStreaming boolOrInt   `json:"optimizedForStreaming"` // plex can return int (GetMetadata(), GetPlaylist()) or boolean (GetSessions()): 0 or 1; true or false
-	Selected              bool        `json:"selected"`
-	VideoCodec            string      `json:"videoCodec"`
-	VideoFrameRate        string      `json:"videoFrameRate"`
-	VideoProfile          string      `json:"videoProfile"`
-	VideoResolution       string      `json:"videoResolution"`
-	Width                 int         `json:"width"`
-	Part                  []Part      `json:"Part"`
+	AspectRatio           json.Number   `json:"aspectRatio"`
+	AudioChannels         int           `json:"audioChannels"`
+	AudioCodec            string        `json:"audioCodec"`
+	AudioProfile          string        `json:"audioProfile"`
+	Bitrate               int           `json:"bitrate"`
+	Container             string        `json:"container"`
+	Duration              int           `json:"duration"`
+	Has64bitOffsets       bool          `json:"has64bitOffsets"`
+	Height                int           `json:"height"`
+	ID                    FlexibleInt64 `json:"id"`
+	OptimizedForStreaming boolOrInt     `json:"optimizedForStreaming"` // plex can return int (GetMetadata(), GetPlaylist()) or boolean (GetSessions()): 0 or 1; true or false
+	Selected              bool          `json:"selected"`
+	VideoCodec            string        `json:"videoCodec"`
+	VideoFrameRate        string        `json:"videoFrameRate"`
+	VideoProfile          string        `json:"videoProfile"`
+	VideoResolution       string        `json:"videoResolution"`
+	Width                 int           `json:"width"`
+	Part                  []Part        `json:"Part"`
 }
 
 // MediaContainer contains media info
@@ -200,9 +214,9 @@ type LibrarySections struct {
 
 // TaggedData ...
 type TaggedData struct {
-	Tag    string      `json:"tag"`
-	Filter string      `json:"filter"`
-	ID     json.Number `json:"id"`
+	Tag    string        `json:"tag"`
+	Filter string        `json:"filter"`
+	ID     FlexibleInt64 `json:"id"`
 }
 
 // Role ...
@@ -355,50 +369,143 @@ type resultResponse struct {
 }
 
 type inviteFriendResponse struct {
-	ID                json.Number `json:"id"`
-	Name              string      `json:"name"`
-	OwnerID           json.Number `json:"ownerId"`
-	InvitedID         json.Number `json:"invitedId"`
-	InvitedEmail      string      `json:"invitedEmail"`
-	ServerID          json.Number `json:"serverId"`
-	Accepted          bool        `json:"accepted"`
-	AcceptedAt        string      `json:"acceptedAt"`
-	DeletedAt         string      `json:"deletedAt"`
-	LeftAt            string      `json:"leftAt"`
-	Owned             bool        `json:"owned"`
-	InviteToken       string      `json:"inviteToken"`
-	MachineIdentifier string      `json:"machineIdentifier"`
-	LastSeenAt        time.Time   `json:"lastSeenAt"`
-	NumLibraries      json.Number `json:"numLibraries"`
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	OwnerID           int64  `json:"ownerId"`
+	InvitedID         int64  `json:"invitedId"`
+	InvitedEmail      string `json:"invitedEmail"`
+	ServerID          int64  `json:"serverId"`
+	Accepted          bool   `json:"accepted"`
+	AcceptedAt        string `json:"acceptedAt"`
+	DeletedAt         string `json:"deletedAt"`
+	LeftAt            string `json:"leftAt"`
+	Owned             bool   `json:"owned"`
+	InviteToken       string `json:"inviteToken"`
+	MachineIdentifier string `json:"machineIdentifier"`
+	LastSeenAt        time.Time
+	NumLibraries      int64 `json:"numLibraries"`
 	Invited           struct {
-		ID         json.Number `json:"id"`
-		UUID       string      `json:"uuid"`
-		Title      string      `json:"title"`
-		Username   string      `json:"username"`
-		Restricted bool        `json:"restricted"`
-		Thumb      string      `json:"thumb"`
-		Status     string      `json:"status"`
+		ID         int64  `json:"id"`
+		UUID       string `json:"uuid"`
+		Title      string `json:"title"`
+		Username   string `json:"username"`
+		Restricted bool   `json:"restricted"`
+		Thumb      string `json:"thumb"`
+		Status     string `json:"status"`
 	} `json:"invited"`
 	SharingSettings struct {
-		AllowChannels    bool   `json:"allowChannels"`
-		FilterMovies     string `json:"filterMovies"`
-		FilterMusic      string `json:"filterMusic"`
-		FilterPhotos     string `json:"filterPhotos"`
-		FilterTelevision string `json:"filterTelevision"`
-		// FilterAll ??? I get null when testing. idk the true type
+		AllowChannels      bool        `json:"allowChannels"`
+		FilterMovies       string      `json:"filterMovies"`
+		FilterMusic        string      `json:"filterMusic"`
+		FilterPhotos       string      `json:"filterPhotos"`
+		FilterTelevision   string      `json:"filterTelevision"`
 		FilterAll          interface{} `json:"filterAll"`
 		AllowSync          bool        `json:"allowSync"`
 		AllowCameraUpload  bool        `json:"allowCameraUpload"`
 		AllowSubtitleAdmin bool        `json:"allowSubtitleAdmin"`
-		AllowTuners        json.Number `json:"allowTuners"`
+		AllowTuners        int64       `json:"allowTuners"`
 	} `json:"sharingSettings"`
 	Libraries []struct {
-		ID    json.Number `json:"id"`
-		Key   json.Number `json:"key"`
-		Title string      `json:"title"`
-		Type  string      `json:"type"`
+		ID    int64  `json:"id"`
+		Key   int64  `json:"key"`
+		Title string `json:"title"`
+		Type  string `json:"type"`
 	} `json:"libraries"`
 	AllLibraries bool `json:"allLibraries"`
+}
+
+// UnmarshalJSON for inviteFriendResponse parses flexible numeric fields.
+func (i *inviteFriendResponse) UnmarshalJSON(b []byte) error {
+	type alias inviteFriendResponse
+	var aux struct {
+		ID           json.RawMessage `json:"id"`
+		OwnerID      json.RawMessage `json:"ownerId"`
+		InvitedID    json.RawMessage `json:"invitedId"`
+		ServerID     json.RawMessage `json:"serverId"`
+		NumLibraries json.RawMessage `json:"numLibraries"`
+		Invited      struct {
+			ID json.RawMessage `json:"id"`
+		} `json:"invited"`
+		SharingSettings struct {
+			AllowTuners json.RawMessage `json:"allowTuners"`
+		} `json:"sharingSettings"`
+		Libraries []struct {
+			ID  json.RawMessage `json:"id"`
+			Key json.RawMessage `json:"key"`
+		} `json:"libraries"`
+		alias
+	}
+
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+
+	*i = inviteFriendResponse(aux.alias)
+
+	if v, err := parseFlexibleInt64(aux.ID); err == nil {
+		i.ID = v
+	} else {
+		return fmt.Errorf("invalid invite id: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.OwnerID); err == nil {
+		i.OwnerID = v
+	} else {
+		return fmt.Errorf("invalid ownerId: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.InvitedID); err == nil {
+		i.InvitedID = v
+	} else {
+		return fmt.Errorf("invalid invitedId: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.ServerID); err == nil {
+		i.ServerID = v
+	} else {
+		return fmt.Errorf("invalid serverId: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.NumLibraries); err == nil {
+		i.NumLibraries = v
+	} else {
+		return fmt.Errorf("invalid numLibraries: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.Invited.ID); err == nil {
+		i.Invited.ID = v
+	} else {
+		return fmt.Errorf("invalid invited.id: %w", err)
+	}
+	if v, err := parseFlexibleInt64(aux.SharingSettings.AllowTuners); err == nil {
+		i.SharingSettings.AllowTuners = v
+	} else {
+		return fmt.Errorf("invalid allowTuners: %w", err)
+	}
+
+	// libraries: ensure we have a slice to populate even if alias unmarshalling didn't fill it
+	if len(i.Libraries) < len(aux.Libraries) {
+		// create a slice with the correct element shape
+		i.Libraries = make([]struct {
+			ID    int64  `json:"id"`
+			Key   int64  `json:"key"`
+			Title string `json:"title"`
+			Type  string `json:"type"`
+		}, len(aux.Libraries))
+	}
+
+	for idx, lib := range aux.Libraries {
+		if idx >= len(i.Libraries) {
+			break
+		}
+		if v, err := parseFlexibleInt64(lib.ID); err == nil {
+			i.Libraries[idx].ID = v
+		} else {
+			return fmt.Errorf("invalid library id: %w", err)
+		}
+		if v, err := parseFlexibleInt64(lib.Key); err == nil {
+			i.Libraries[idx].Key = v
+		} else {
+			return fmt.Errorf("invalid library key: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // InviteFriendParams are the params to invite a friend
@@ -799,67 +906,67 @@ type TranscodeSessionsResponse struct {
 
 // Stream ...
 type Stream struct {
-	AlbumGain          string      `json:"albumGain"`
-	AlbumPeak          string      `json:"albumPeak"`
-	AlbumRange         string      `json:"albumRange"`
-	Anamorphic         bool        `json:"anamorphic"`
-	AudioChannelLayout string      `json:"audioChannelLayout"`
-	BitDepth           int         `json:"bitDepth"`
-	Bitrate            int         `json:"bitrate"`
-	BitrateMode        string      `json:"bitrateMode"`
-	Cabac              string      `json:"cabac"`
-	Channels           int         `json:"channels"`
-	ChromaLocation     string      `json:"chromaLocation"`
-	ChromaSubsampling  string      `json:"chromaSubsampling"`
-	Codec              string      `json:"codec"`
-	CodecID            string      `json:"codecID"`
-	ColorRange         string      `json:"colorRange"`
-	ColorSpace         string      `json:"colorSpace"`
-	Default            bool        `json:"default"`
-	DisplayTitle       string      `json:"displayTitle"`
-	Duration           string      `json:"duration"`
-	FrameRate          float64     `json:"frameRate"`
-	FrameRateMode      string      `json:"frameRateMode"`
-	Gain               string      `json:"gain"`
-	HasScalingMatrix   bool        `json:"hasScalingMatrix"`
-	Height             int         `json:"height"`
-	ID                 json.Number `json:"id"`
-	Index              int         `json:"index"`
-	Language           string      `json:"language"`
-	LanguageCode       string      `json:"languageCode"`
-	Level              int         `json:"level"`
-	Location           string      `json:"location"`
-	Loudness           string      `json:"loudness"`
-	Lra                string      `json:"lra"`
-	Peak               string      `json:"peak"`
-	PixelAspectRatio   string      `json:"pixelAspectRatio"`
-	PixelFormat        string      `json:"pixelFormat"`
-	Profile            string      `json:"profile"`
-	RefFrames          int         `json:"refFrames"`
-	SamplingRate       int         `json:"samplingRate"`
-	ScanType           string      `json:"scanType"`
-	Selected           bool        `json:"selected"`
-	StreamIdentifier   string      `json:"streamIdentifier"`
-	StreamType         int         `json:"streamType"`
-	Width              int         `json:"width"`
+	AlbumGain          string        `json:"albumGain"`
+	AlbumPeak          string        `json:"albumPeak"`
+	AlbumRange         string        `json:"albumRange"`
+	Anamorphic         bool          `json:"anamorphic"`
+	AudioChannelLayout string        `json:"audioChannelLayout"`
+	BitDepth           int           `json:"bitDepth"`
+	Bitrate            int           `json:"bitrate"`
+	BitrateMode        string        `json:"bitrateMode"`
+	Cabac              string        `json:"cabac"`
+	Channels           int           `json:"channels"`
+	ChromaLocation     string        `json:"chromaLocation"`
+	ChromaSubsampling  string        `json:"chromaSubsampling"`
+	Codec              string        `json:"codec"`
+	CodecID            string        `json:"codecID"`
+	ColorRange         string        `json:"colorRange"`
+	ColorSpace         string        `json:"colorSpace"`
+	Default            bool          `json:"default"`
+	DisplayTitle       string        `json:"displayTitle"`
+	Duration           string        `json:"duration"`
+	FrameRate          float64       `json:"frameRate"`
+	FrameRateMode      string        `json:"frameRateMode"`
+	Gain               string        `json:"gain"`
+	HasScalingMatrix   bool          `json:"hasScalingMatrix"`
+	Height             int           `json:"height"`
+	ID                 FlexibleInt64 `json:"id"`
+	Index              int           `json:"index"`
+	Language           string        `json:"language"`
+	LanguageCode       string        `json:"languageCode"`
+	Level              int           `json:"level"`
+	Location           string        `json:"location"`
+	Loudness           string        `json:"loudness"`
+	Lra                string        `json:"lra"`
+	Peak               string        `json:"peak"`
+	PixelAspectRatio   string        `json:"pixelAspectRatio"`
+	PixelFormat        string        `json:"pixelFormat"`
+	Profile            string        `json:"profile"`
+	RefFrames          int           `json:"refFrames"`
+	SamplingRate       int           `json:"samplingRate"`
+	ScanType           string        `json:"scanType"`
+	Selected           bool          `json:"selected"`
+	StreamIdentifier   string        `json:"streamIdentifier"`
+	StreamType         int           `json:"streamType"`
+	Width              int           `json:"width"`
 }
 
 // Part ...
 type Part struct {
-	AudioProfile          string      `json:"audioProfile"`
-	Container             string      `json:"container"`
-	Decision              string      `json:"decision"`
-	Duration              int         `json:"duration"`
-	File                  string      `json:"file"`
-	Has64bitOffsets       bool        `json:"has64bitOffsets"`
-	HasThumbnail          string      `json:"hasThumbnail"`
-	ID                    json.Number `json:"id"`
-	Key                   string      `json:"key"`
-	OptimizedForStreaming boolOrInt   `json:"optimizedForStreaming"`
-	Selected              bool        `json:"selected"`
-	Size                  int         `json:"size"`
-	Stream                []Stream    `json:"Stream"`
-	VideoProfile          string      `json:"videoProfile"`
+	AudioProfile          string        `json:"audioProfile"`
+	Container             string        `json:"container"`
+	Decision              string        `json:"decision"`
+	Duration              int           `json:"duration"`
+	File                  string        `json:"file"`
+	Has64bitOffsets       bool          `json:"has64bitOffsets"`
+	HasThumbnail          string        `json:"hasThumbnail"`
+	ID                    FlexibleInt64 `json:"id"`
+	Key                   string        `json:"key"`
+	OptimizedForStreaming boolOrInt     `json:"optimizedForStreaming"`
+	Selected              bool          `json:"selected"`
+	Size                  int           `json:"size"`
+	Stream                []Stream      `json:"Stream"`
+	VideoProfile          string        `json:"videoProfile"`
 }
 
 // Player ...
@@ -898,14 +1005,14 @@ type CurrentSessions struct {
 
 // Rating
 type Rating struct {
-	Image string      `json:"image"`
-	Type  string      `json:"type"`
-	Value json.Number `json:"value"`
+	Image string        `json:"image"`
+	Type  string        `json:"type"`
+	Value FlexibleInt64 `json:"value"`
 }
 
 // Genre
 type Genre struct {
-	Filter string      `json:"filter"`
-	ID     json.Number `json:"id"`
-	Tag    string      `json:"tag"`
+	Filter string        `json:"filter"`
+	ID     FlexibleInt64 `json:"id"`
+	Tag    string        `json:"tag"`
 }

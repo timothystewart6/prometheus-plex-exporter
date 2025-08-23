@@ -138,7 +138,7 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		title, season, episode := labels(session.media)
-		library := s.server.Library(session.media.LibrarySectionID.String())
+		library := s.server.Library(strconv.FormatInt(session.media.LibrarySectionID.Int64(), 10))
 		if library == nil {
 			continue
 		}
