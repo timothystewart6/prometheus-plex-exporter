@@ -5,7 +5,10 @@ local statPanel = grafana.statPanel;
 
 local utils = import 'snmp-mixin/lib/utils.libsonnet';
 
-local matcher = 'job=~"$job", instance=~"$instance", server=~"$server"';
+// Include an optional transcode_type template variable so dashboards can
+// filter by transcode type (audio/video/both/none). When the template
+// includes All, it will be set to '.+' and match all values.
+local matcher = 'job=~"$job", instance=~"$instance", server=~"$server", transcode_type=~"$transcode_type"';
 
 local dow = [
   'Sunday',
@@ -139,6 +142,20 @@ local server_template =
     '$datasource',
     'label_values(plays_total{job=~"$job", instance=~"$instance"}, server)',
     label='server',
+    refresh='load',
+    multi=true,
+    includeAll=true,
+    allValues='.+',
+  );
+
+local transcode_template =
+  grafana.template.new(
+    'transcode_type',
+    '$datasource',
+    // Pull distinct transcode_type values from plays_total; dashboards
+    // will show "none" for non-transcoded streams per the exporter.
+    'label_values(plays_total{job=~"$job", instance=~"$instance", server=~"$server"}, transcode_type)',
+    label='Transcode Type',
     refresh='load',
     multi=true,
     includeAll=true,
@@ -653,9 +670,9 @@ local sourceResBar =
     datasource='$datasource',
     unit='s',
   )
-  .addTarget(grafana.prometheus.target(queries.duration_by_file_resolution, interval='5m', legendFormat='{{res}}')) {
+  .addTarget(grafana.prometheus.target(queries.duration_by_file_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}}')) {
     type: 'barchart',
-    options+: {
+  options+: {
       reduceOptions+: {
         calcs: [
           'max',
@@ -696,7 +713,9 @@ local sourceResBar =
       {
         id: 'groupingToMatrix',
         options: {
-          columnField: 'stream_type',
+          // Include transcode_type so columns are split by stream_type AND
+          // transcode_type (e.g. directplay/none, transcode/audio).
+          columnField: 'stream_type\\transcode_type',
           rowField: 'res',
           valueField: 'Total',
         },
@@ -710,9 +729,9 @@ local streamResBar =
     datasource='$datasource',
     unit='s',
   )
-  .addTarget(grafana.prometheus.target(queries.duration_by_resolution, interval='5m', legendFormat='{{res}}')) {
+  .addTarget(grafana.prometheus.target(queries.duration_by_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}}')) {
     type: 'barchart',
-    options+: {
+  options+: {
       reduceOptions+: {
         calcs: [
           'max',
@@ -753,7 +772,9 @@ local streamResBar =
       {
         id: 'groupingToMatrix',
         options: {
-          columnField: 'stream_type',
+          // Break columns by stream_type and transcode_type for clearer
+          // resolution/transcode breakdowns.
+          columnField: 'stream_type\\transcode_type',
           rowField: 'res',
           valueField: 'Total',
         },
@@ -771,7 +792,8 @@ local playback_dashboard =
     ds_template,
     job_template,
     instance_template,
-    server_template,
+  server_template,
+  transcode_template,
   ])
   .addPanels([
     grafana.row.new('$server', repeat='server') { gridPos: { h: 1, w: 24, x: 0, y: 0 } },
