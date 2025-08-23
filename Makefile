@@ -34,7 +34,7 @@ docker-component: check-component exe
 	docker build -t timothystewart6/$(COMPONENT) --build-arg=TARGETARCH=$(GOARCH) -f ./cmd/$(COMPONENT)/Dockerfile .
 	docker tag timothystewart6/$(COMPONENT) $(COMPONENT)
 	docker tag timothystewart6/$(COMPONENT) ghcr.io/timothystewart6/$(COMPONENT):latest
-	docker tag timothystewart6/$(COMPONENT) ghcr.io/timothystewart6/$(COMPONENT):main
+	# Do not tag images with 'main' - CI will publish only 'latest' and the short SHA
 
 .PHONY: docker-prometheus-plex-exporter
 docker-prometheus-plex-exporter:
