@@ -36,7 +36,7 @@ jobs:
         CGO_ENABLED: "0"
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
-    - run: go test -exec=true ./...
+    - run: go test ./...
       env:
         CGO_ENABLED: "0"
         GOOS: ${{ matrix.goos }}
