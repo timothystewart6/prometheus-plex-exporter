@@ -35,13 +35,13 @@ func TestOnTranscodeUpdateHandlerSetsSessionType(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected session %q to exist", tt.ts.Key)
 			}
-			 if ss.transcodeType != tt.want {
-			 	t.Fatalf("session transcodeType = %q, want %q", ss.transcodeType, tt.want)
-			 }
-			 // subtitle_action defaults to "none" for these test cases
-			 if ss.subtitleAction != "none" {
-			 	t.Fatalf("expected subtitleAction=none, got %q", ss.subtitleAction)
-			 }
+			if ss.transcodeType != tt.want {
+				t.Fatalf("session transcodeType = %q, want %q", ss.transcodeType, tt.want)
+			}
+			// subtitle_action defaults to "none" for these test cases
+			if ss.subtitleAction != "none" {
+				t.Fatalf("expected subtitleAction=none, got %q", ss.subtitleAction)
+			}
 		})
 	}
 }
