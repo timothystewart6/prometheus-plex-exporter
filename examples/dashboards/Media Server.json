@@ -1835,11 +1835,11 @@
           "datasource": {
             "uid": "$datasource"
           },
-          "expr": "sum(increase(\n  label_replace(\n  label_replace(\n      play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\",stream_type!=\"\"}\n  , \"res\", \"$1\", \"stream_file_resolution\", \"(.*)\")\n  , \"res\", \"${1}p\", \"stream_file_resolution\", \"^([0-9]+)$\")\n  \n[$__interval:])) by (stream_type, res)\n",
+          "expr": "sum(increase(\n  label_replace(\n  label_replace(\n      play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\",stream_type!=\"\"}\n  , \"res\", \"$1\", \"stream_file_resolution\", \"(.*)\")\n  , \"res\", \"${1}p\", \"stream_file_resolution\", \"^([0-9]+)$\")\n  \n[$__interval:])) by (stream_type, transcode_type, subtitle_action, res)\n",
           "format": "time_series",
           "interval": "5m",
           "intervalFactor": 2,
-          "legendFormat": "{{res}}",
+          "legendFormat": "{{res}} - {{transcode_type}} - {{subtitle_action}}",
           "refId": "A"
         }
       ],
@@ -1869,7 +1869,7 @@
         {
           "id": "groupingToMatrix",
           "options": {
-            "columnField": "stream_type",
+            "columnField": "stream_type\\\u0005transcode_type\\\u0005subtitle_action",
             "rowField": "res",
             "valueField": "Total"
           }
@@ -1953,11 +1953,11 @@
           "datasource": {
             "uid": "$datasource"
           },
-          "expr": "sum(increase(\n  label_replace(\n  label_replace(\n      play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\",stream_type!=\"\"}\n  , \"res\", \"$1\", \"stream_resolution\", \"(.*)\")\n  , \"res\", \"${1}p\", \"stream_resolution\", \"^([0-9]+)$\")\n  \n[$__interval:])) by (stream_type, res)\n",
+          "expr": "sum(increase(\n  label_replace(\n  label_replace(\n      play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\",stream_type!=\"\"}\n  , \"res\", \"$1\", \"stream_resolution\", \"(.*)\")\n  , \"res\", \"${1}p\", \"stream_resolution\", \"^([0-9]+)$\")\n  \n[$__interval:])) by (stream_type, transcode_type, subtitle_action, res)\n",
           "format": "time_series",
           "interval": "5m",
           "intervalFactor": 2,
-          "legendFormat": "{{res}}",
+          "legendFormat": "{{res}} - {{transcode_type}} - {{subtitle_action}}",
           "refId": "A"
         }
       ],
@@ -1987,7 +1987,7 @@
         {
           "id": "groupingToMatrix",
           "options": {
-            "columnField": "stream_type",
+            "columnField": "stream_type\\\u0005transcode_type\\\u0005subtitle_action",
             "rowField": "res",
             "valueField": "Total"
           }

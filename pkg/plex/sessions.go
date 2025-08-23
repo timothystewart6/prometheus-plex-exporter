@@ -46,6 +46,8 @@ type session struct {
 	// are received via the websocket. Helps keep metrics stable and avoid
 	// trying to infer transcode type at collection time.
 	transcodeType string
+	// persisted subtitle action for this session (burn|copy|none)
+	subtitleAction string
 }
 
 type sessions struct {
@@ -128,6 +130,70 @@ func (s *sessions) SetTranscodeType(sessionID, ttype string) {
 	ss := s.sessions[sessionID]
 	ss.transcodeType = ttype
 	s.sessions[sessionID] = ss
+}
+
+// SetSubtitleAction sets the subtitle action for a given session id.
+func (s *sessions) SetSubtitleAction(sessionID, action string) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if ss, ok := s.sessions[sessionID]; ok {
+		ss.subtitleAction = action
+		s.sessions[sessionID] = ss
+		return
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey == sessionID {
+			ss.subtitleAction = action
+			s.sessions[k] = ss
+			return
+		}
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey != "" && (strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID)) {
+			ss.subtitleAction = action
+			s.sessions[k] = ss
+			return
+		}
+	}
+
+	ss := s.sessions[sessionID]
+	ss.subtitleAction = action
+	s.sessions[sessionID] = ss
+}
+
+// TrySetSubtitleAction behaves like SetSubtitleAction but returns true if a
+// session was found and updated.
+func (s *sessions) TrySetSubtitleAction(sessionID, action string) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if ss, ok := s.sessions[sessionID]; ok {
+		ss.subtitleAction = action
+		s.sessions[sessionID] = ss
+		return true
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey == sessionID {
+			ss.subtitleAction = action
+			s.sessions[k] = ss
+			return true
+		}
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey != "" && (strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID)) {
+			ss.subtitleAction = action
+			s.sessions[k] = ss
+			return true
+		}
+	}
+
+	// fallback: no match
+	return false
 }
 
 // TrySetTranscodeType behaves like SetTranscodeType but returns true if a
@@ -294,6 +360,7 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			session.session.User.Title,
 			id,
 			session.transcodeType,
+			session.subtitleAction,
 		)
 
 		totalPlayTime := session.prevPlayedTime
@@ -322,6 +389,7 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			session.session.User.Title,
 			id,
 			session.transcodeType,
+			session.subtitleAction,
 		)
 	}
 

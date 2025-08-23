@@ -32,6 +32,9 @@ func TestOnTranscodeUpdateHandlerCreatesSession(t *testing.T) {
 	if ss.transcodeType != "audio" {
 		t.Fatalf("expected transcodeType=audio, got %q", ss.transcodeType)
 	}
+	if ss.subtitleAction != "none" {
+		t.Fatalf("expected subtitleAction=none, got %q", ss.subtitleAction)
+	}
 }
 
 // Concurrent updates should not cause races; final value should be one of expected.
@@ -68,6 +71,13 @@ func TestOnTranscodeUpdateHandlerConcurrent(t *testing.T) {
 		// ok
 	default:
 		t.Fatalf("unexpected transcodeType %q", ss.transcodeType)
+	}
+	// subtitleAction should be one of these (or none)
+	switch ss.subtitleAction {
+	case "none", "copy", "burn":
+		// ok
+	default:
+		t.Fatalf("unexpected subtitleAction %q", ss.subtitleAction)
 	}
 }
 

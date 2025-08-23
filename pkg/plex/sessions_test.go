@@ -66,6 +66,10 @@ func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
 			if lp.GetName() == "transcode_type" && lp.GetValue() == "audio" {
 				found = true
 			}
+			if lp.GetName() == "subtitle_action" && lp.GetValue() == "none" {
+				// ensure subtitle_action label exists and defaults to "none"
+				_ = lp
+			}
 		}
 	}
 

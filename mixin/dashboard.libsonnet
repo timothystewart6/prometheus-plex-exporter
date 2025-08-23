@@ -8,7 +8,7 @@ local utils = import 'snmp-mixin/lib/utils.libsonnet';
 // Include an optional transcode_type template variable so dashboards can
 // filter by transcode type (audio/video/both/none). When the template
 // includes All, it will be set to '.+' and match all values.
-local matcher = 'job=~"$job", instance=~"$instance", server=~"$server", transcode_type=~"$transcode_type"';
+local matcher = 'job=~"$job", instance=~"$instance", server=~"$server", transcode_type=~"$transcode_type", subtitle_action=~"$subtitle_action"';
 
 local dow = [
   'Sunday',
@@ -156,6 +156,18 @@ local transcode_template =
     // will show "none" for non-transcoded streams per the exporter.
     'label_values(plays_total{job=~"$job", instance=~"$instance", server=~"$server"}, transcode_type)',
     label='Transcode Type',
+    refresh='load',
+    multi=true,
+    includeAll=true,
+    allValues='.+',
+  );
+
+local subtitle_template =
+  grafana.template.new(
+    'subtitle_action',
+    '$datasource',
+    'label_values(plays_total{job=~"$job", instance=~"$instance", server=~"$server"}, subtitle_action)',
+    label='Subtitle Action',
     refresh='load',
     multi=true,
     includeAll=true,
