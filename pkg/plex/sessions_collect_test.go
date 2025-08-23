@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -36,21 +36,21 @@ func TestSessionsCollectEmitsPlayAndPlayDuration(t *testing.T) {
 	s := NewSessions(ctx, srv)
 
 	// Build session and media metadata
-	mdSession := jrplex.Metadata{
+	mdSession := ttPlex.Metadata{
 		SessionKey: "sess-1",
-		Media: []jrplex.Media{{
-			Part:            []jrplex.Part{{Decision: "DirectPlay"}},
+		Media: []ttPlex.Media{{
+			Part:            []ttPlex.Part{{Decision: "DirectPlay"}},
 			VideoResolution: "1080",
 			Bitrate:         8000,
 		}},
-		Player: jrplex.Player{Device: "DeviceX", Product: "DeviceType"},
-		User:   jrplex.User{Title: "alice"},
+		Player: ttPlex.Player{Device: "DeviceX", Product: "DeviceType"},
+		User:   ttPlex.User{Title: "alice"},
 	}
-	mdMedia := jrplex.Metadata{
+	mdMedia := ttPlex.Metadata{
 		Type:             "movie",
 		Title:            "MyMovie",
-		LibrarySectionID: jrplex.FlexibleInt64(1),
-		Media:            []jrplex.Media{{VideoResolution: "1080"}},
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Media:            []ttPlex.Media{{VideoResolution: "1080"}},
 	}
 
 	// Insert session with a non-zero playStarted so Collect will emit metrics

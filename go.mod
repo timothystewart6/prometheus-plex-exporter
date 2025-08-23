@@ -5,9 +5,9 @@ go 1.23.0
 require (
 	github.com/go-kit/log v0.2.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/jrudio/go-plex-client v0.0.0-20220428052413-e5b4386beb17
 	github.com/prometheus/client_golang v1.23.0
 	github.com/prometheus/client_model v0.6.2
+	github.com/timothystewart6/go-plex-client v0.0.0-20250823231744-bab8e0fbc91d
 )
 
 require (
@@ -21,6 +21,3 @@ require (
 	golang.org/x/sys v0.33.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
-
-// Replace for fix: https://github.com/jrudio/go-plex-client/pull/56
-replace github.com/jrudio/go-plex-client => github.com/timothystewart6/go-plex-client v0.0.0-20230428232959-d53064b6f34a

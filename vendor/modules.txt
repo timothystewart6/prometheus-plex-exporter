@@ -17,9 +17,6 @@ github.com/google/uuid
 # github.com/gorilla/websocket v1.5.3
 ## explicit; go 1.12
 github.com/gorilla/websocket
-# github.com/jrudio/go-plex-client v0.0.0-20220428052413-e5b4386beb17 => github.com/timothystewart6/go-plex-client v0.0.0-20230428232959-d53064b6f34a
-## explicit; go 1.12
-github.com/jrudio/go-plex-client
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
@@ -44,6 +41,9 @@ github.com/prometheus/common/model
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
+# github.com/timothystewart6/go-plex-client v0.0.0-20250823231744-bab8e0fbc91d
+## explicit; go 1.12
+github.com/timothystewart6/go-plex-client
 # golang.org/x/sys v0.33.0
 ## explicit; go 1.23.0
 golang.org/x/sys/unix
@@ -79,4 +79,3 @@ google.golang.org/protobuf/reflect/protoregistry
 google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/known/timestamppb
-# github.com/jrudio/go-plex-client => github.com/timothystewart6/go-plex-client v0.0.0-20230428232959-d53064b6f34a

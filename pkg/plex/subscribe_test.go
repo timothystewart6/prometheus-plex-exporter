@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 func TestSubscribeToNotifications_InvokesEventHandler(t *testing.T) {
@@ -40,14 +40,14 @@ func TestSubscribeToNotifications_InvokesEventHandler(t *testing.T) {
 	defer srv.Close()
 
 	// Create a Plex client pointing at the test server
-	p, err := jrplex.New(srv.URL, "token")
+	p, err := ttPlex.New(srv.URL, "token")
 	if err != nil {
 		t.Fatalf("failed to create plex client: %v", err)
 	}
 
-	events := jrplex.NewNotificationEvents()
+	events := ttPlex.NewNotificationEvents()
 	called := make(chan struct{}, 1)
-	events.OnTranscodeUpdate(func(n jrplex.NotificationContainer) {
+	events.OnTranscodeUpdate(func(n ttPlex.NotificationContainer) {
 		called <- struct{}{}
 	})
 

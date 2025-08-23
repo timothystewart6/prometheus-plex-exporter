@@ -3,13 +3,13 @@ package plex
 import (
 	"strings"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 // transcodeKind returns one of: "video", "audio", "both", or "unknown".
 // It inspects source vs. target codec fields in the TranscodeSession reported
 // by the Plex websocket notification.
-func transcodeKind(ts jrplex.TranscodeSession) string {
+func transcodeKind(ts ttPlex.TranscodeSession) string {
 	vSrc := strings.ToLower(strings.TrimSpace(ts.SourceVideoCodec))
 	vNew := strings.ToLower(strings.TrimSpace(ts.VideoCodec))
 	aSrc := strings.ToLower(strings.TrimSpace(ts.SourceAudioCodec))

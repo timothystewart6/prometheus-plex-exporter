@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -28,21 +28,21 @@ func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
 	ss.resolvedLibraryType = "movie"
 
 	// session.session must have Media with Part and Player/User fields used in Collect
-	ss.session = jrplex.Metadata{
-		Media: []jrplex.Media{{
+	ss.session = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			Bitrate:         1000,
 			VideoResolution: "720p",
-			Part: []jrplex.Part{{
+			Part: []ttPlex.Part{{
 				Decision: "transcode",
 			}},
 		}},
-		Player: jrplex.Player{Device: "dev", Product: "plex-player"},
-		User:   jrplex.User{Title: "alice"},
+		Player: ttPlex.Player{Device: "dev", Product: "plex-player"},
+		User:   ttPlex.User{Title: "alice"},
 	}
 
 	// media metadata used for file resolution
-	ss.media = jrplex.Metadata{
-		Media: []jrplex.Media{{
+	ss.media = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			VideoResolution: "1080p",
 		}},
 	}
@@ -80,13 +80,13 @@ func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
 }
 
 func TestLabelsFunction(t *testing.T) {
-	m := jrplex.Metadata{Type: "episode", GrandparentTitle: "Show", ParentTitle: "S1", Title: "E1"}
+	m := ttPlex.Metadata{Type: "episode", GrandparentTitle: "Show", ParentTitle: "S1", Title: "E1"}
 	title, season, episode := labels(m)
 	if title != "Show" || season != "S1" || episode != "E1" {
 		t.Fatalf("unexpected labels for episode: %v %v %v", title, season, episode)
 	}
 
-	m2 := jrplex.Metadata{Type: "movie", Title: "MyMovie"}
+	m2 := ttPlex.Metadata{Type: "movie", Title: "MyMovie"}
 	t2, s2, e2 := labels(m2)
 	if t2 != "MyMovie" || s2 != "" || e2 != "" {
 		t.Fatalf("unexpected labels for movie: %v %v %v", t2, s2, e2)
@@ -98,7 +98,7 @@ func TestExtrapolatedTransmittedBytes(t *testing.T) {
 
 	// add a playing session that started 2 seconds ago with bitrate 1000
 	s.sessions["a"] = session{
-		session:     jrplex.Metadata{Media: []jrplex.Media{{Bitrate: 1000}}},
+		session:     ttPlex.Metadata{Media: []ttPlex.Media{{Bitrate: 1000}}},
 		state:       statePlaying,
 		playStarted: time.Now().Add(-2 * time.Second),
 	}
@@ -114,7 +114,7 @@ func TestUpdateAccumulatesAndPrunes(t *testing.T) {
 
 	// simulate a playing session that began 1 second ago
 	s.sessions["s1"] = session{
-		session:     jrplex.Metadata{Media: []jrplex.Media{{Bitrate: 500}}},
+		session:     ttPlex.Metadata{Media: []ttPlex.Media{{Bitrate: 500}}},
 		state:       statePlaying,
 		playStarted: time.Now().Add(-1 * time.Second),
 	}
@@ -155,21 +155,21 @@ func TestSessionsCollectWithUnknownLibrary(t *testing.T) {
 	// Don't set ss.playStarted or ss.state - let Update handle the transition
 	// Don't set resolved library fields to test fallback
 
-	ss.session = jrplex.Metadata{
-		Media: []jrplex.Media{{
+	ss.session = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			Bitrate:         1000,
 			VideoResolution: "720p",
-			Part: []jrplex.Part{{
+			Part: []ttPlex.Part{{
 				Decision: "direct_play",
 			}},
 		}},
-		Player: jrplex.Player{Device: "device", Product: "player"},
-		User:   jrplex.User{Title: "user"},
+		Player: ttPlex.Player{Device: "device", Product: "player"},
+		User:   ttPlex.User{Title: "user"},
 	}
 
-	ss.media = jrplex.Metadata{
-		LibrarySectionID: jrplex.FlexibleInt64(999), // Non-existent library
-		Media: []jrplex.Media{{
+	ss.media = ttPlex.Metadata{
+		LibrarySectionID: ttPlex.FlexibleInt64(999), // Non-existent library
+		Media: []ttPlex.Media{{
 			VideoResolution: "1080p",
 		}},
 	}
@@ -235,20 +235,20 @@ func TestSessionsCollectSkipsSessionsWithoutPlayStarted(t *testing.T) {
 	ss.resolvedLibraryID = "1"
 	ss.resolvedLibraryType = "movie"
 
-	ss.session = jrplex.Metadata{
-		Media: []jrplex.Media{{
+	ss.session = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			Bitrate:         1000,
 			VideoResolution: "720p",
-			Part: []jrplex.Part{{
+			Part: []ttPlex.Part{{
 				Decision: "transcode",
 			}},
 		}},
-		Player: jrplex.Player{Device: "dev", Product: "player"},
-		User:   jrplex.User{Title: "alice"},
+		Player: ttPlex.Player{Device: "dev", Product: "player"},
+		User:   ttPlex.User{Title: "alice"},
 	}
 
-	ss.media = jrplex.Metadata{
-		Media: []jrplex.Media{{
+	ss.media = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			VideoResolution: "1080p",
 		}},
 	}
@@ -280,22 +280,22 @@ func TestSessionsCollectWithResolvedLibrary(t *testing.T) {
 	})
 
 	// Create a session using Update method with resolved library info
-	sessionMeta := &jrplex.Metadata{
-		Media: []jrplex.Media{{
+	sessionMeta := &ttPlex.Metadata{
+		Media: []ttPlex.Media{{
 			Bitrate:         2000,
 			VideoResolution: "1080p",
-			Part: []jrplex.Part{{
+			Part: []ttPlex.Part{{
 				Decision: "copy",
 			}},
 		}},
-		Player: jrplex.Player{Device: "tablet", Product: "plex-app"},
-		User:   jrplex.User{Title: "bob"},
+		Player: ttPlex.Player{Device: "tablet", Product: "plex-app"},
+		User:   ttPlex.User{Title: "bob"},
 	}
 
-	mediaMeta := &jrplex.Metadata{
+	mediaMeta := &ttPlex.Metadata{
 		Type:  "movie",
 		Title: "Test Movie",
-		Media: []jrplex.Media{{
+		Media: []ttPlex.Media{{
 			VideoResolution: "4K",
 		}},
 	}

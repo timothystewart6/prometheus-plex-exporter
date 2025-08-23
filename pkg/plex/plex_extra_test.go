@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -132,7 +132,7 @@ func TestListenAlreadyListeningAndNewPlexError(t *testing.T) {
 	// newPlex failure path
 	original := newPlex
 	defer func() { newPlex = original }()
-	newPlex = func(urlStr, token string) (*jrplex.Plex, error) { return nil, errors.New("boom") }
+	newPlex = func(urlStr, token string) (*ttPlex.Plex, error) { return nil, errors.New("boom") }
 
 	u, _ := url.Parse("http://example")
 	s2 := &Server{URL: u, Token: "t"}

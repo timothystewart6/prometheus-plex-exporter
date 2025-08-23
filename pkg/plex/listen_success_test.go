@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/gorilla/websocket"
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 // TestListen_SuccessfulSubscribePath verifies that Server.Listen returns when
@@ -34,8 +34,8 @@ func TestListen_SuccessfulSubscribePath(t *testing.T) {
 
 	// override newPlex to return a client that points at our test server
 	old := newPlex
-	newPlex = func(base, token string) (*jrplex.Plex, error) {
-		return jrplex.New(base, token)
+	newPlex = func(base, token string) (*ttPlex.Plex, error) {
+		return ttPlex.New(base, token)
 	}
 	defer func() { newPlex = old }()
 

@@ -3,18 +3,18 @@ package plex
 import (
 	"testing"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 func TestTranscodeKind(t *testing.T) {
 	tests := []struct {
 		name string
-		ts   jrplex.TranscodeSession
+		ts   ttPlex.TranscodeSession
 		want string
 	}{
 		{
 			name: "video transcode",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceVideoCodec: "h264",
 				VideoCodec:       "hevc",
 			},
@@ -22,7 +22,7 @@ func TestTranscodeKind(t *testing.T) {
 		},
 		{
 			name: "audio transcode",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceAudioCodec: "aac",
 				AudioCodec:       "mp3",
 			},
@@ -30,7 +30,7 @@ func TestTranscodeKind(t *testing.T) {
 		},
 		{
 			name: "both transcode",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceVideoCodec: "h264",
 				VideoCodec:       "vp9",
 				SourceAudioCodec: "aac",
@@ -40,12 +40,12 @@ func TestTranscodeKind(t *testing.T) {
 		},
 		{
 			name: "unknown when empty",
-			ts:   jrplex.TranscodeSession{},
+			ts:   ttPlex.TranscodeSession{},
 			want: "unknown",
 		},
 		{
 			name: "case and whitespace insensitive",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceVideoCodec: " H264 ",
 				VideoCodec:       "h264",
 			},
@@ -53,14 +53,14 @@ func TestTranscodeKind(t *testing.T) {
 		},
 		{
 			name: "heuristic video if only source present",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceVideoCodec: "h264",
 			},
 			want: "video",
 		},
 		{
 			name: "heuristic audio if only audio present",
-			ts: jrplex.TranscodeSession{
+			ts: ttPlex.TranscodeSession{
 				SourceAudioCodec: "aac",
 			},
 			want: "audio",

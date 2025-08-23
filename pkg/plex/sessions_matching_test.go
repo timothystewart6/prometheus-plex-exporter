@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 func TestSetAndTrySetTranscodeType_MatchingVariants(t *testing.T) {
@@ -14,7 +14,7 @@ func TestSetAndTrySetTranscodeType_MatchingVariants(t *testing.T) {
 	s := NewSessions(ctx, &Server{})
 
 	// Exact map key
-	m1 := jrplex.Metadata{SessionKey: "sess-1"}
+	m1 := ttPlex.Metadata{SessionKey: "sess-1"}
 	s.mtx.Lock()
 	s.sessions["key1"] = session{session: m1}
 	s.mtx.Unlock()
@@ -35,7 +35,7 @@ func TestSetAndTrySetTranscodeType_MatchingVariants(t *testing.T) {
 	s.mtx.Unlock()
 
 	// Substring match: store under a different map key with SessionKey set
-	m2 := jrplex.Metadata{SessionKey: "abc"}
+	m2 := ttPlex.Metadata{SessionKey: "abc"}
 	s.mtx.Lock()
 	s.sessions["k-abc"] = session{session: m2}
 	s.mtx.Unlock()
@@ -54,8 +54,8 @@ func TestTrySetTranscodeType_HeuristicFallback(t *testing.T) {
 	s := NewSessions(ctx, &Server{})
 
 	// Create a session that has Media.Part[0].Decision == "transcode"
-	media := jrplex.Media{Part: []jrplex.Part{{Decision: "transcode"}}}
-	md := jrplex.Metadata{Media: []jrplex.Media{media}}
+	media := ttPlex.Media{Part: []ttPlex.Part{{Decision: "transcode"}}}
+	md := ttPlex.Metadata{Media: []ttPlex.Media{media}}
 
 	s.mtx.Lock()
 	s.sessions["other"] = session{session: md}
@@ -79,7 +79,7 @@ func TestSetAndTrySetSubtitleAction_MatchingVariants(t *testing.T) {
 	s := NewSessions(ctx, &Server{})
 
 	// Exact map key
-	m1 := jrplex.Metadata{SessionKey: "sess-sub"}
+	m1 := ttPlex.Metadata{SessionKey: "sess-sub"}
 	s.mtx.Lock()
 	s.sessions["subkey"] = session{session: m1}
 	s.mtx.Unlock()
@@ -103,7 +103,7 @@ func TestSetAndTrySetSubtitleAction_MatchingVariants(t *testing.T) {
 	s.mtx.Unlock()
 
 	// Substring match
-	m2 := jrplex.Metadata{SessionKey: "def"}
+	m2 := ttPlex.Metadata{SessionKey: "def"}
 	s.mtx.Lock()
 	s.sessions["x-def-y"] = session{session: m2}
 	s.mtx.Unlock()
@@ -128,7 +128,7 @@ func TestSetSubtitleAction_InnerSubstringAndFallback(t *testing.T) {
 	s := NewSessions(ctx, &Server{})
 
 	// Inner-key match
-	inner := jrplex.Metadata{SessionKey: "inner-1"}
+	inner := ttPlex.Metadata{SessionKey: "inner-1"}
 	s.mtx.Lock()
 	s.sessions["kinner"] = session{session: inner}
 	s.mtx.Unlock()
@@ -141,7 +141,7 @@ func TestSetSubtitleAction_InnerSubstringAndFallback(t *testing.T) {
 	s.mtx.Unlock()
 
 	// Substring match
-	sub := jrplex.Metadata{SessionKey: "subid"}
+	sub := ttPlex.Metadata{SessionKey: "subid"}
 	s.mtx.Lock()
 	s.sessions["pre-subid-post"] = session{session: sub}
 	s.mtx.Unlock()

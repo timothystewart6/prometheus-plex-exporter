@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	plexclient "github.com/jrudio/go-plex-client"
+	plexclient "github.com/timothystewart6/go-plex-client"
 )
 
 func TestTimelineEntryQuotedIDs(t *testing.T) {

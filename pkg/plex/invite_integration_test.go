@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	jrplex "github.com/jrudio/go-plex-client"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 func TestInviteFriendEndToEnd(t *testing.T) {
@@ -32,12 +32,12 @@ func TestInviteFriendEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	// create a client that points to the test server
-	p, err := jrplex.New(srv.URL, "token")
+	p, err := ttPlex.New(srv.URL, "token")
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	params := jrplex.InviteFriendParams{UsernameOrEmail: "a@b.c", MachineID: "m", Label: "", LibraryIDs: []int{1}}
+	params := ttPlex.InviteFriendParams{UsernameOrEmail: "a@b.c", MachineID: "m", Label: "", LibraryIDs: []int{1}}
 	if err := p.InviteFriend(params); err != nil {
 		t.Fatalf("InviteFriend failed: %v", err)
 	}
