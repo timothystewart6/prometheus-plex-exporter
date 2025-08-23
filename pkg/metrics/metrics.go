@@ -31,6 +31,7 @@ var (
 		"device_type",            //
 		"user",                   // User name
 		"session",
+		"transcode_type",
 	)
 
 	ServerInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -198,9 +199,11 @@ func Play(value float64, serverType, serverName, serverID,
 	title, childTitle, grandchildTitle,
 	streamType, streamResolution, streamFileResolution, streamBitrate,
 	device, deviceType,
-	user, session string,
+	user, session, transcodeType string,
 ) prometheus.Metric {
 
+	// the last label is transcode_type; callers should pass a value such as
+	// "audio", "video", "both", or "unknown".
 	return prometheus.MustNewConstMetric(MetricPlayCountDesc,
 		prometheus.CounterValue,
 		value,
@@ -210,7 +213,7 @@ func Play(value float64, serverType, serverName, serverID,
 		title, childTitle, grandchildTitle,
 		streamType, streamResolution, streamFileResolution, streamBitrate,
 		device, deviceType,
-		user, session,
+		user, session, transcodeType,
 	)
 }
 
@@ -220,9 +223,11 @@ func PlayDuration(value float64, serverType, serverName, serverID,
 	title, childTitle, grandchildTitle,
 	streamType, streamResolution, streamFileResolution, streamBitrate,
 	device, deviceType,
-	user, session string,
+	user, session, transcodeType string,
 ) prometheus.Metric {
 
+	// last label is transcode_type; default to unknown here and let callers
+	// update if they can determine the type.
 	return prometheus.MustNewConstMetric(MetricPlaySecondsTotalDesc,
 		prometheus.CounterValue,
 		value,
@@ -232,6 +237,6 @@ func PlayDuration(value float64, serverType, serverName, serverID,
 		title, childTitle, grandchildTitle,
 		streamType, streamResolution, streamFileResolution, streamBitrate,
 		device, deviceType,
-		user, session,
+		user, session, transcodeType,
 	)
 }

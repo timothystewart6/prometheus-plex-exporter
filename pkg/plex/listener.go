@@ -105,6 +105,8 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 	events := plex.NewNotificationEvents()
 	events.OnPlaying(s.listener.onPlayingHandler)
 	events.OnTimeline(s.listener.onTimelineHandler)
+	// register transcode update handler to record transcode type
+	events.OnTranscodeUpdate(s.listener.onTranscodeUpdateHandler)
 
 	// TODO - Does this automatically reconnect on websocket failure?
 	conn.SubscribeToNotifications(events, ctrlC, onError)
@@ -167,6 +169,25 @@ func (l *plexListener) onTimelineHandler(c plex.NotificationContainer) {
 	}
 
 	_ = level.Info(l.log).Log("msg", "timeline entries", "count", len(c.TimelineEntry), "entries", strings.Join(summaries, " | "))
+}
+
+// onTranscodeUpdateHandler receives TranscodeSession updates and logs a concise
+// transcode type (audio/video/both). We avoid sending nested structs to the
+// logger and only emit primitive fields.
+func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
+	if len(c.TranscodeSession) == 0 {
+		return
+	}
+
+	// process each transcode session
+	for _, ts := range c.TranscodeSession {
+		kind := transcodeKind(ts)
+		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind)
+		// persist transcode type for the session so Collect() can emit the label
+		if l.activeSessions != nil {
+			l.activeSessions.SetTranscodeType(ts.Key, kind)
+		}
+	}
 }
 
 func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
