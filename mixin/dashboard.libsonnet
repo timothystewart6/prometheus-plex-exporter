@@ -682,7 +682,7 @@ local sourceResBar =
     datasource='$datasource',
     unit='s',
   )
-  .addTarget(grafana.prometheus.target(queries.duration_by_file_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}}')) {
+  .addTarget(grafana.prometheus.target(queries.duration_by_file_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}} - {{subtitle_action}}')) {
     type: 'barchart',
   options+: {
       reduceOptions+: {
@@ -727,7 +727,7 @@ local sourceResBar =
         options: {
           // Include transcode_type so columns are split by stream_type AND
           // transcode_type (e.g. directplay/none, transcode/audio).
-          columnField: 'stream_type\\transcode_type',
+          columnField: 'stream_type\\transcode_type\\subtitle_action',
           rowField: 'res',
           valueField: 'Total',
         },
@@ -741,7 +741,7 @@ local streamResBar =
     datasource='$datasource',
     unit='s',
   )
-  .addTarget(grafana.prometheus.target(queries.duration_by_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}}')) {
+  .addTarget(grafana.prometheus.target(queries.duration_by_resolution, interval='5m', legendFormat='{{res}} - {{transcode_type}} - {{subtitle_action}}')) {
     type: 'barchart',
   options+: {
       reduceOptions+: {
@@ -786,7 +786,7 @@ local streamResBar =
         options: {
           // Break columns by stream_type and transcode_type for clearer
           // resolution/transcode breakdowns.
-          columnField: 'stream_type\\transcode_type',
+          columnField: 'stream_type\\transcode_type\\subtitle_action',
           rowField: 'res',
           valueField: 'Total',
         },
