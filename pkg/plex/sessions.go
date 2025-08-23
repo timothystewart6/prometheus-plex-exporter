@@ -41,6 +41,10 @@ type session struct {
 	resolvedLibraryName string
 	resolvedLibraryID   string
 	resolvedLibraryType string
+	// persisted transcode type for this session, set when transcode events
+	// are received via the websocket. Helps keep metrics stable and avoid
+	// trying to infer transcode type at collection time.
+	transcodeType string
 }
 
 type sessions struct {
@@ -81,6 +85,16 @@ func (s *sessions) pruneOldSessions() {
 			delete(s.sessions, k)
 		}
 	}
+}
+
+// SetTranscodeType sets the transcode type for a given session id.
+// It's safe to call concurrently with other session updates.
+func (s *sessions) SetTranscodeType(sessionID, ttype string) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	ss := s.sessions[sessionID]
+	ss.transcodeType = ttype
+	s.sessions[sessionID] = ss
 }
 
 func (s *sessions) Update(sessionID string, newState sessionState, newSession *plex.Metadata, media *plex.Metadata) {
@@ -198,6 +212,7 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			session.session.Player.Product,                 // device type
 			session.session.User.Title,
 			id,
+			session.transcodeType,
 		)
 
 		totalPlayTime := session.prevPlayedTime
@@ -225,6 +240,7 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			session.session.Player.Product,                 // device type
 			session.session.User.Title,
 			id,
+			session.transcodeType,
 		)
 	}
 

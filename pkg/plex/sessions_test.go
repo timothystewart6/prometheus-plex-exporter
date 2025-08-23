@@ -4,17 +4,84 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jrudio/go-plex-client"
+	jrplex "github.com/jrudio/go-plex-client"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
+func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
+	s := &sessions{
+		sessions: map[string]session{},
+		server: &Server{
+			Name: "test-server",
+			ID:   "srv-1",
+		},
+	}
+
+	// Build a minimal session record with required nested fields.
+	ss := session{}
+	ss.playStarted = time.Now().Add(-5 * time.Second)
+	ss.state = statePlaying
+	ss.resolvedLibraryName = "lib"
+	ss.resolvedLibraryID = "1"
+	ss.resolvedLibraryType = "movie"
+
+	// session.session must have Media with Part and Player/User fields used in Collect
+	ss.session = jrplex.Metadata{
+		Media: []jrplex.Media{{
+			Bitrate:         1000,
+			VideoResolution: "720p",
+			Part: []jrplex.Part{{
+				Decision: "transcode",
+			}},
+		}},
+		Player: jrplex.Player{Device: "dev", Product: "plex-player"},
+		User:   jrplex.User{Title: "alice"},
+	}
+
+	// media metadata used for file resolution
+	ss.media = jrplex.Metadata{
+		Media: []jrplex.Media{{
+			VideoResolution: "1080p",
+		}},
+	}
+
+	// set persisted transcode type and put into sessions map
+	ss.transcodeType = "audio"
+	sid := "session-1"
+	s.sessions[sid] = ss
+
+	// Collect metrics
+	ch := make(chan prometheus.Metric, 10)
+	s.Collect(ch)
+	close(ch)
+
+	found := false
+	for m := range ch {
+		var dtoMetric dto.Metric
+		if err := m.Write(&dtoMetric); err != nil {
+			t.Fatalf("failed to write metric: %v", err)
+		}
+		for _, lp := range dtoMetric.Label {
+			if lp.GetName() == "transcode_type" && lp.GetValue() == "audio" {
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected collected metrics to include transcode_type=audio label")
+	}
+}
+
 func TestLabelsFunction(t *testing.T) {
-	m := plex.Metadata{Type: "episode", GrandparentTitle: "Show", ParentTitle: "S1", Title: "E1"}
+	m := jrplex.Metadata{Type: "episode", GrandparentTitle: "Show", ParentTitle: "S1", Title: "E1"}
 	title, season, episode := labels(m)
 	if title != "Show" || season != "S1" || episode != "E1" {
 		t.Fatalf("unexpected labels for episode: %v %v %v", title, season, episode)
 	}
 
-	m2 := plex.Metadata{Type: "movie", Title: "MyMovie"}
+	m2 := jrplex.Metadata{Type: "movie", Title: "MyMovie"}
 	t2, s2, e2 := labels(m2)
 	if t2 != "MyMovie" || s2 != "" || e2 != "" {
 		t.Fatalf("unexpected labels for movie: %v %v %v", t2, s2, e2)
@@ -26,7 +93,7 @@ func TestExtrapolatedTransmittedBytes(t *testing.T) {
 
 	// add a playing session that started 2 seconds ago with bitrate 1000
 	s.sessions["a"] = session{
-		session:     plex.Metadata{Media: []plex.Media{{Bitrate: 1000}}},
+		session:     jrplex.Metadata{Media: []jrplex.Media{{Bitrate: 1000}}},
 		state:       statePlaying,
 		playStarted: time.Now().Add(-2 * time.Second),
 	}
@@ -42,7 +109,7 @@ func TestUpdateAccumulatesAndPrunes(t *testing.T) {
 
 	// simulate a playing session that began 1 second ago
 	s.sessions["s1"] = session{
-		session:     plex.Metadata{Media: []plex.Media{{Bitrate: 500}}},
+		session:     jrplex.Metadata{Media: []jrplex.Media{{Bitrate: 500}}},
 		state:       statePlaying,
 		playStarted: time.Now().Add(-1 * time.Second),
 	}

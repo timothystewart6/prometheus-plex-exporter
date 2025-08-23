@@ -6,36 +6,65 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	plex "github.com/jrudio/go-plex-client"
+	jrplex "github.com/jrudio/go-plex-client"
 )
+
+func TestOnTranscodeUpdateHandlerSetsSessionType(t *testing.T) {
+	tests := []struct {
+		name string
+		ts   jrplex.TranscodeSession
+		want string
+	}{
+		{name: "video", ts: jrplex.TranscodeSession{Key: "s1", SourceVideoCodec: "h264", VideoCodec: "hevc"}, want: "video"},
+		{name: "audio", ts: jrplex.TranscodeSession{Key: "s2", SourceAudioCodec: "aac", AudioCodec: "mp3"}, want: "audio"},
+		{name: "both", ts: jrplex.TranscodeSession{Key: "s3", SourceVideoCodec: "h264", VideoCodec: "vp9", SourceAudioCodec: "aac", AudioCodec: "ac3"}, want: "both"},
+		{name: "unknown", ts: jrplex.TranscodeSession{Key: "s4"}, want: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// prepare sessions store and listener
+			sessStore := &sessions{sessions: map[string]session{}, server: &Server{Name: "srv", ID: "id"}}
+			l := &plexListener{activeSessions: sessStore, log: log.NewNopLogger()}
+
+			// call handler
+			c := jrplex.NotificationContainer{TranscodeSession: []jrplex.TranscodeSession{tt.ts}}
+			l.onTranscodeUpdateHandler(c)
+
+			ss, ok := sessStore.sessions[tt.ts.Key]
+			if !ok {
+				t.Fatalf("expected session %q to exist", tt.ts.Key)
+			}
+			if ss.transcodeType != tt.want {
+				t.Fatalf("session transcodeType = %q, want %q", ss.transcodeType, tt.want)
+			}
+		})
+	}
+}
 
 // fakePlex implements minimal methods used by plexListener
 type fakePlex struct{}
 
-func (f *fakePlex) GetSessions() (plex.CurrentSessions, error) {
-	s := plex.CurrentSessions{}
-	s.MediaContainer.Metadata = []plex.Metadata{{
+func (f *fakePlex) GetSessions() (jrplex.CurrentSessions, error) {
+	s := jrplex.CurrentSessions{}
+	s.MediaContainer.Metadata = []jrplex.Metadata{{
 		SessionKey: "sess1",
-		User:       plex.User{Title: "user1", ID: "u1"},
+		User:       jrplex.User{Title: "user1", ID: "u1"},
 	}, {
 		SessionKey: "sess2",
-		User:       plex.User{Title: "user2", ID: "u2"},
+		User:       jrplex.User{Title: "user2", ID: "u2"},
 	}}
 	return s, nil
 }
 
-func (f *fakePlex) GetMetadata(ratingKey string) (plex.MediaMetadata, error) {
-	mm := plex.MediaMetadata{}
-	mm.MediaContainer.Metadata = []plex.Metadata{{
+func (f *fakePlex) GetMetadata(ratingKey string) (jrplex.MediaMetadata, error) {
+	mm := jrplex.MediaMetadata{}
+	mm.MediaContainer.Metadata = []jrplex.Metadata{{
 		RatingKey: ratingKey,
 		Title:     "Episode 1",
 	}}
 	return mm, nil
 }
-
-// implement the methods used by the real plex.Plex interface used here
-// Note: We only implement the two methods GetSessions and GetMetadata used
-// by onPlaying.
 
 func TestOnPlayingUpdatesSessions(t *testing.T) {
 	s := &Server{Name: "srv", ID: "id"}
@@ -47,8 +76,8 @@ func TestOnPlayingUpdatesSessions(t *testing.T) {
 	}
 
 	// craft a notification container with one playing notification
-	c := plex.NotificationContainer{}
-	c.PlaySessionStateNotification = []plex.PlaySessionStateNotification{{
+	c := jrplex.NotificationContainer{}
+	c.PlaySessionStateNotification = []jrplex.PlaySessionStateNotification{{
 		SessionKey: "sess1",
 		RatingKey:  "rk1",
 		State:      "playing",
@@ -94,8 +123,8 @@ func TestOnPlayingLogsFirstNotification(t *testing.T) {
 	}
 
 	// craft a notification container with two playing notifications
-	c := plex.NotificationContainer{}
-	c.PlaySessionStateNotification = []plex.PlaySessionStateNotification{{
+	c := jrplex.NotificationContainer{}
+	c.PlaySessionStateNotification = []jrplex.PlaySessionStateNotification{{
 		SessionKey: "sess1",
 		RatingKey:  "rk1",
 		State:      "playing",
@@ -138,8 +167,8 @@ func TestOnTimelineLogsEntries(t *testing.T) {
 	}
 
 	// craft a notification container with two timeline entries
-	c := plex.NotificationContainer{}
-	c.TimelineEntry = []plex.TimelineEntry{{
+	c := jrplex.NotificationContainer{}
+	c.TimelineEntry = []jrplex.TimelineEntry{{
 		Identifier: "id1",
 		ItemID:     123,
 		Title:      "Test1",
