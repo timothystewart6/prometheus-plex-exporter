@@ -32,7 +32,7 @@ var (
 		"user",                   // User name
 		"session",
 		"transcode_type",
-			"subtitle_action",
+		"subtitle_action",
 	)
 
 	ServerInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{

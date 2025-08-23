@@ -185,7 +185,7 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 		// determine subtitle action: prefer explicit container indicating sidecar
 		subtitle := "none"
 		c := strings.ToLower(strings.TrimSpace(ts.Container))
-	vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
+		vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
 		if c == "srt" || strings.Contains(c, "srt") {
 			subtitle = "copy"
 		} else if vDecision == "transcode" {
