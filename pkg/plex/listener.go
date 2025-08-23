@@ -17,9 +17,23 @@ var (
 	ErrAlreadyListening = errors.New("already listening")
 )
 
+// newPlex is a variable so tests can replace it with a fake constructor.
+var newPlex = plex.New
+
+type plexClient interface {
+	GetSessions() (plex.CurrentSessions, error)
+	GetMetadata(string) (plex.MediaMetadata, error)
+}
+
+// Ensure the concrete plex.Plex from the vendored client implements the
+// minimal interface we require. This provides a helpful compile-time check
+// and documents the intent: production code uses *plex.Plex while tests may
+// provide fakes that implement the same methods.
+var _ plexClient = (*plex.Plex)(nil)
+
 type plexListener struct {
 	server         *Server
-	conn           *plex.Plex
+	conn           plexClient
 	activeSessions *sessions
 	log            log.Logger
 }
@@ -31,7 +45,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 		return ErrAlreadyListening
 	}
 
-	conn, err := plex.New(s.URL.String(), s.Token)
+	conn, err := newPlex(s.URL.String(), s.Token)
 	if err != nil {
 		s.mtx.Unlock()
 		return fmt.Errorf("failed to connect to %s: %w", s.URL.String(), err)
