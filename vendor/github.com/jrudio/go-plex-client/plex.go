@@ -20,8 +20,12 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	// plexURL is a variable so tests can override it (httptest) for integration testing.
+	plexURL = "https://plex.tv"
+)
+
 const (
-	plexURL         = "https://plex.tv"
 	applicationXml  = "application/xml"
 	applicationJson = "application/json"
 )
@@ -622,7 +626,13 @@ func (p *Plex) InviteFriend(params InviteFriendParams) error {
 
 	label := url.QueryEscape(params.Label)
 
-	query := fmt.Sprintf("%s/api/v2/shared_servers", plexURL)
+	// Prefer the instance URL if set (testability / local servers). Fall back to plex.tv.
+	base := plexURL
+	if p.URL != "" {
+		base = p.URL
+	}
+
+	query := fmt.Sprintf("%s/api/v2/shared_servers", base)
 
 	var requestBody inviteFriendBody
 
