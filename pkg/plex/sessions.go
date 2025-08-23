@@ -35,6 +35,12 @@ type session struct {
 	lastUpdate     time.Time
 	playStarted    time.Time
 	prevPlayedTime time.Duration
+	// Persisted library labels resolved when the media was first seen.
+	// Keeping these prevents metric label churn if server library lookup
+	// temporarily fails later.
+	resolvedLibraryName string
+	resolvedLibraryID   string
+	resolvedLibraryType string
 }
 
 type sessions struct {
@@ -89,6 +95,19 @@ func (s *sessions) Update(sessionID string, newState sessionState, newSession *p
 
 	if media != nil {
 		ss.media = *media
+		// Attempt to resolve the library for this media and persist the
+		// labels so later Collect() can emit stable labels even if the
+		// server's library list is temporarily unavailable.
+		if ss.resolvedLibraryName == "" {
+			if media.LibrarySectionID.Int64() != 0 {
+				lib := s.server.Library(strconv.FormatInt(media.LibrarySectionID.Int64(), 10))
+				if lib != nil {
+					ss.resolvedLibraryName = lib.Name
+					ss.resolvedLibraryID = lib.ID
+					ss.resolvedLibraryType = lib.Type
+				}
+			}
+		}
 	}
 
 	if ss.state == statePlaying && newState != statePlaying {
@@ -138,9 +157,25 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		title, season, episode := labels(session.media)
-		library := s.server.Library(strconv.FormatInt(session.media.LibrarySectionID.Int64(), 10))
-		if library == nil {
-			continue
+
+		// Prefer persisted resolved labels if available; fall back to
+		// live lookup and then to 'unknown' if necessary.
+		var libraryName, libraryID, libraryType string
+		if session.resolvedLibraryName != "" {
+			libraryName = session.resolvedLibraryName
+			libraryID = session.resolvedLibraryID
+			libraryType = session.resolvedLibraryType
+		} else {
+			library := s.server.Library(strconv.FormatInt(session.media.LibrarySectionID.Int64(), 10))
+			if library == nil {
+				libraryName = "unknown"
+				libraryID = "0"
+				libraryType = "unknown"
+			} else {
+				libraryName = library.Name
+				libraryID = library.ID
+				libraryType = library.Type
+			}
 		}
 
 		ch <- metrics.Play(
@@ -148,9 +183,9 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			"plex",
 			s.server.Name,
 			s.server.ID,
-			library.Name,
-			library.ID,
-			library.Type,
+			libraryName,
+			libraryID,
+			libraryType,
 			session.media.Type,
 			title,
 			season,
@@ -175,9 +210,9 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			"plex",
 			s.server.Name,
 			s.server.ID,
-			library.Name,
-			library.ID,
-			library.Type,
+			libraryName,
+			libraryID,
+			libraryType,
 			session.media.Type,
 			title,
 			season,
