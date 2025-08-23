@@ -202,8 +202,12 @@ func Play(value float64, serverType, serverName, serverID,
 	user, session, transcodeType string,
 ) prometheus.Metric {
 
-	// the last label is transcode_type; callers should pass a value such as
-	// "audio", "video", "both", or "unknown".
+	// the last label is transcode_type; callers may pass a value such as
+	// "audio", "video", "both", or "unknown". If empty, emit the
+	// explicit value "none" so the label is always present and stable.
+	if transcodeType == "" {
+		transcodeType = "none"
+	}
 	return prometheus.MustNewConstMetric(MetricPlayCountDesc,
 		prometheus.CounterValue,
 		value,
@@ -226,8 +230,11 @@ func PlayDuration(value float64, serverType, serverName, serverID,
 	user, session, transcodeType string,
 ) prometheus.Metric {
 
-	// last label is transcode_type; default to unknown here and let callers
-	// update if they can determine the type.
+	// last label is transcode_type; emit an explicit "none" when empty so
+	// downstream aggregations and dashboards don't see an empty label value.
+	if transcodeType == "" {
+		transcodeType = "none"
+	}
 	return prometheus.MustNewConstMetric(MetricPlaySecondsTotalDesc,
 		prometheus.CounterValue,
 		value,
