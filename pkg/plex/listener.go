@@ -185,6 +185,36 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind)
 		// persist transcode type for the session so Collect() can emit the label
 		if l.activeSessions != nil {
+			// Try a best-effort match and if it fails, fetch current sessions
+			// and active transcode sessions to aid debugging.
+			matched := l.activeSessions.TrySetTranscodeType(ts.Key, kind)
+			if matched {
+				continue
+			}
+
+			// No match: log concise diagnostics. Avoid expensive operations
+			// in hot paths, but this helps debugging mismatched keys.
+			if conn, ok := l.conn.(*plex.Plex); ok {
+				if sessions, err := conn.GetSessions(); err == nil {
+					// Summarize session keys and player info
+					var ssum []string
+					for _, sess := range sessions.MediaContainer.Metadata {
+						ssum = append(ssum, fmt.Sprintf("k=%s user=%s player=%s", sess.SessionKey, sess.User.Title, sess.Player.Product))
+					}
+					_ = level.Warn(l.log).Log("msg", "transcode update did not match any active session", "tsKey", ts.Key, "detectedKind", kind, "knownSessions", strings.Join(ssum, "; "))
+				} else {
+					_ = level.Warn(l.log).Log("msg", "transcode update match failed and GetSessions failed", "tsKey", ts.Key, "err", err)
+				}
+
+				if tcs, err := conn.GetTranscodeSessions(); err == nil {
+					var tsum []string
+					for _, t := range tcs.Children {
+						tsum = append(tsum, fmt.Sprintf("k=%s video=%s audio=%s decision=%s", t.Key, t.VideoCodec, t.AudioCodec, t.VideoDecision))
+					}
+					_ = level.Warn(l.log).Log("msg", "active transcode sessions", "list", strings.Join(tsum, "; "))
+				}
+			}
+			// Ensure we still set the transcode type (fallback/create behavior).
 			l.activeSessions.SetTranscodeType(ts.Key, kind)
 		}
 	}
