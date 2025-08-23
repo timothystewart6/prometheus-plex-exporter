@@ -229,6 +229,7 @@ type TranscodeSession struct {
 	Remaining            int64   `json:"remaining"`
 	SourceAudioCodec     string  `json:"sourceAudioCodec"`
 	SourceVideoCodec     string  `json:"sourceVideoCodec"`
+	SubtitleDecision     string  `json:"subtitleDecision"`
 	Speed                float64 `json:"speed"`
 	Throttled            bool    `json:"throttled"`
 	TranscodeHwRequested bool    `json:"transcodeHwRequested"`

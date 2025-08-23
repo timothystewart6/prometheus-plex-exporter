@@ -182,15 +182,25 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 	// process each transcode session
 	for _, ts := range c.TranscodeSession {
 		kind := transcodeKind(ts)
-		// determine subtitle action: prefer explicit container indicating sidecar
+		// determine subtitle action: prefer explicit subtitleDecision when present
 		subtitle := "none"
-		c := strings.ToLower(strings.TrimSpace(ts.Container))
-		vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
-		if c == "srt" || strings.Contains(c, "srt") {
-			subtitle = "copy"
-		} else if vDecision == "transcode" {
-			// subtitle burn-in usually causes video to be transcoded
-			subtitle = "burn"
+		sd := strings.ToLower(strings.TrimSpace(ts.SubtitleDecision))
+		if sd != "" {
+			if sd == "burn" || sd == "burn-in" {
+				subtitle = "burn"
+			} else if sd == "copy" || sd == "copying" {
+				subtitle = "copy"
+			}
+		} else {
+			// fallback heuristics: prefer explicit container indicating sidecar
+			c := strings.ToLower(strings.TrimSpace(ts.Container))
+			vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
+			if c == "srt" || strings.Contains(c, "srt") {
+				subtitle = "copy"
+			} else if vDecision == "transcode" {
+				// subtitle burn-in usually causes video to be transcoded
+				subtitle = "burn"
+			}
 		}
 
 		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind, "subtitle", subtitle)
@@ -202,6 +212,26 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 			subMatched := l.activeSessions.TrySetSubtitleAction(ts.Key, subtitle)
 			if matched && subMatched {
 				continue
+			}
+
+			// If we failed to match the transcode update to an active session,
+			// try refreshing the server session list and populate our sessions
+			// map; websocket notifications can arrive slightly before the
+			// initial session list is available.
+			if conn, ok := l.conn.(*plex.Plex); ok {
+				if sessions, err := conn.GetSessions(); err == nil {
+					for _, sess := range sessions.MediaContainer.Metadata {
+						// Use statePlaying as these are active sessions reported by the server
+						// We don't have the full Media metadata here; pass nil for media.
+						l.activeSessions.Update(sess.SessionKey, statePlaying, &sess, nil)
+					}
+					// Retry matching after refresh
+					matched = l.activeSessions.TrySetTranscodeType(ts.Key, kind)
+					subMatched = l.activeSessions.TrySetSubtitleAction(ts.Key, subtitle)
+					if matched && subMatched {
+						continue
+					}
+				}
 			}
 
 			// No match: log concise diagnostics. Avoid expensive operations
@@ -224,6 +254,83 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 						tsum = append(tsum, fmt.Sprintf("k=%s video=%s audio=%s decision=%s", t.Key, t.VideoCodec, t.AudioCodec, t.VideoDecision))
 					}
 					_ = level.Warn(l.log).Log("msg", "active transcode sessions", "list", strings.Join(tsum, "; "))
+
+					// Attempt to find a matching transcode session entry and use it
+					// as a source of truth for subtitleDecision (and re-try matching
+					// the sessions map). This covers cases where websocket payloads
+					// omit subtitleDecision but the HTTP endpoint exposes it.
+					for _, t := range tcs.Children {
+						match := false
+						if t.Key == ts.Key || strings.Contains(ts.Key, t.Key) || strings.Contains(t.Key, ts.Key) {
+							match = true
+						}
+						if !match {
+							continue
+						}
+						// Derive subtitle from explicit field if present, otherwise fall back.
+						subFromAPI := ""
+						if strings.TrimSpace(t.SubtitleDecision) != "" {
+							sd := strings.ToLower(strings.TrimSpace(t.SubtitleDecision))
+							if sd == "burn" || sd == "burn-in" {
+								subFromAPI = "burn"
+							} else if sd == "copy" || sd == "copying" {
+								subFromAPI = "copy"
+							}
+						} else {
+							c := strings.ToLower(strings.TrimSpace(t.Container))
+							if c == "srt" || strings.Contains(c, "srt") {
+								subFromAPI = "copy"
+							} else if strings.ToLower(strings.TrimSpace(t.VideoDecision)) == "transcode" {
+								subFromAPI = "burn"
+							}
+						}
+
+						if subFromAPI != "" || true {
+							// derive an explicit transcode kind from the API when possible
+							apiKind := ""
+							vDecisionAPI := strings.ToLower(strings.TrimSpace(t.VideoDecision))
+							aDecisionAPI := strings.ToLower(strings.TrimSpace(t.AudioDecision))
+							if vDecisionAPI == "transcode" {
+								if aDecisionAPI == "transcode" {
+									apiKind = "both"
+								} else {
+									apiKind = "video"
+								}
+							} else if aDecisionAPI == "transcode" {
+								apiKind = "audio"
+							}
+
+							if subFromAPI != "" {
+								_ = level.Info(l.log).Log("msg", "derived subtitle action from transcode sessions API", "tsKey", t.Key, "subtitle", subFromAPI)
+							}
+							// Try to persist to the session entry
+							if l.activeSessions != nil {
+								applied := false
+								if subFromAPI != "" {
+									if l.activeSessions.TrySetSubtitleAction(ts.Key, subFromAPI) {
+										subMatched = true
+										applied = true
+									}
+									// try setting transcode type from API kind if present
+									if apiKind != "" {
+										if l.activeSessions.TrySetTranscodeType(ts.Key, apiKind) {
+											matched = true
+											applied = true
+										}
+									}
+								}
+								// if we didn't apply anything yet, still attempt to set transcode type
+								if !applied && apiKind != "" {
+									if l.activeSessions.TrySetTranscodeType(ts.Key, apiKind) {
+										matched = true
+									}
+								}
+								if applied {
+									break
+								}
+							}
+						}
+					}
 				}
 			}
 			// Ensure we still set the transcode type and subtitle action (fallback/create behavior).
