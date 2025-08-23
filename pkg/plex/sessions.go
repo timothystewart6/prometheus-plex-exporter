@@ -3,6 +3,7 @@ package plex
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,9 +93,89 @@ func (s *sessions) pruneOldSessions() {
 func (s *sessions) SetTranscodeType(sessionID, ttype string) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
+	// Fast-path: exact map key match
+	if ss, ok := s.sessions[sessionID]; ok {
+		ss.transcodeType = ttype
+		s.sessions[sessionID] = ss
+		return
+	}
+
+	// Try to find a session whose inner Metadata.SessionKey equals the
+	// provided sessionID (some websocket notifications use slightly
+	// different keys). If found, set the transcode type on that session.
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey == sessionID {
+			ss.transcodeType = ttype
+			s.sessions[k] = ss
+			return
+		}
+	}
+
+	// Heuristic: attempt substring matches in either direction. This
+	// handles cases where the notification key contains extra prefixes
+	// or suffixes compared to the session key.
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey != "" && (strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID)) {
+			ss.transcodeType = ttype
+			s.sessions[k] = ss
+			return
+		}
+	}
+
+	// Fallback: create/set an entry under the provided key so tests that
+	// expect this behavior continue to pass.
 	ss := s.sessions[sessionID]
 	ss.transcodeType = ttype
 	s.sessions[sessionID] = ss
+}
+
+// TrySetTranscodeType behaves like SetTranscodeType but returns true if a
+// session was found and updated. This allows callers to detect no-match and
+// emit additional debug information without duplicating matching logic.
+func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if ss, ok := s.sessions[sessionID]; ok {
+		ss.transcodeType = ttype
+		s.sessions[sessionID] = ss
+		return true
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey == sessionID {
+			ss.transcodeType = ttype
+			s.sessions[k] = ss
+			return true
+		}
+	}
+
+	for k, ss := range s.sessions {
+		if ss.session.SessionKey != "" && (strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID)) {
+			ss.transcodeType = ttype
+			s.sessions[k] = ss
+			return true
+		}
+	}
+
+	// No existing session matched.
+	// Heuristic fallback: apply to any session that currently has a
+	// part decision of "transcode". This handles cases where the
+	// websocket transcode key doesn't map directly to our session map
+	// keys but the server is clearly performing a transcode for a
+	// session we already track.
+	applied := false
+	for k, ss := range s.sessions {
+		if len(ss.session.Media) > 0 && len(ss.session.Media[0].Part) > 0 {
+			if ss.session.Media[0].Part[0].Decision == "transcode" {
+				ss.transcodeType = ttype
+				s.sessions[k] = ss
+				applied = true
+			}
+		}
+	}
+	return applied
 }
 
 func (s *sessions) Update(sessionID string, newState sessionState, newSession *plex.Metadata, media *plex.Metadata) {
