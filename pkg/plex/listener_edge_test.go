@@ -106,6 +106,10 @@ func (f *fakeRetry) GetMetadata(ratingKey string) (jrplex.MediaMetadata, error) 
 	return mm, nil
 }
 
+func (f *fakeRetry) GetTranscodeSessions() (jrplex.TranscodeSessionsResponse, error) {
+	return jrplex.TranscodeSessionsResponse{}, nil
+}
+
 func TestOnPlayingRetriesGetSessions(t *testing.T) {
 	// speed up retries for test
 	oldMax := SessionLookupMaxRetries

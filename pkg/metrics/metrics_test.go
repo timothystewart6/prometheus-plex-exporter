@@ -3,8 +3,52 @@ package metrics
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+func metricLabelValue(m prometheus.Metric, name string) string {
+	var pm dto.Metric
+	if err := m.Write(&pm); err != nil {
+		return ""
+	}
+	for _, lp := range pm.Label {
+		if lp.GetName() == name {
+			return lp.GetValue()
+		}
+	}
+	return ""
+}
+
+func TestPlayDefaultsTranscodeAndSubtitleToNone(t *testing.T) {
+	m := Play(1.0, "plex", "srv", "id", "lib", "libid", "libtype", "movie", "Title", "Child", "Grand", "DirectPlay", "1080", "1080", "8000", "Device", "DevType", "user", "sess", "", "")
+	if v := metricLabelValue(m, "transcode_type"); v != "none" {
+		t.Fatalf("expected transcode_type=none, got %q", v)
+	}
+	if v := metricLabelValue(m, "subtitle_action"); v != "none" {
+		t.Fatalf("expected subtitle_action=none, got %q", v)
+	}
+}
+
+func TestPlayEmitsProvidedTranscodeAndSubtitle(t *testing.T) {
+	m := Play(1.0, "plex", "srv", "id", "lib", "libid", "libtype", "movie", "Title", "Child", "Grand", "transcode", "1080", "1080", "8000", "Device", "DevType", "user", "sess", "audio", "copy")
+	if v := metricLabelValue(m, "transcode_type"); v != "audio" {
+		t.Fatalf("expected transcode_type=audio, got %q", v)
+	}
+	if v := metricLabelValue(m, "subtitle_action"); v != "copy" {
+		t.Fatalf("expected subtitle_action=copy, got %q", v)
+	}
+}
+
+func TestPlayDurationDefaultsTranscodeAndSubtitleToNone(t *testing.T) {
+	m := PlayDuration(5.0, "plex", "srv", "id", "lib", "libid", "libtype", "movie", "Title", "Child", "Grand", "DirectPlay", "1080", "1080", "8000", "Device", "DevType", "user", "sess", "", "")
+	if v := metricLabelValue(m, "transcode_type"); v != "none" {
+		t.Fatalf("expected transcode_type=none, got %q", v)
+	}
+	if v := metricLabelValue(m, "subtitle_action"); v != "none" {
+		t.Fatalf("expected subtitle_action=none, got %q", v)
+	}
+}
 
 func TestLibraryItemsMetric(t *testing.T) {
 	m := LibraryItems(15, "plex", "srv", "id123", "movie", "MyLib", "lib1")
