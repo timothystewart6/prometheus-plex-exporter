@@ -182,13 +182,25 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 	// process each transcode session
 	for _, ts := range c.TranscodeSession {
 		kind := transcodeKind(ts)
-		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind)
-		// persist transcode type for the session so Collect() can emit the label
+		// determine subtitle action: prefer explicit container indicating sidecar
+		subtitle := "none"
+		c := strings.ToLower(strings.TrimSpace(ts.Container))
+	vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
+		if c == "srt" || strings.Contains(c, "srt") {
+			subtitle = "copy"
+		} else if vDecision == "transcode" {
+			// subtitle burn-in usually causes video to be transcoded
+			subtitle = "burn"
+		}
+
+		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind, "subtitle", subtitle)
+		// persist transcode type and subtitle action for the session so Collect() can emit the label
 		if l.activeSessions != nil {
 			// Try a best-effort match and if it fails, fetch current sessions
 			// and active transcode sessions to aid debugging.
 			matched := l.activeSessions.TrySetTranscodeType(ts.Key, kind)
-			if matched {
+			subMatched := l.activeSessions.TrySetSubtitleAction(ts.Key, subtitle)
+			if matched && subMatched {
 				continue
 			}
 
@@ -214,8 +226,9 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 					_ = level.Warn(l.log).Log("msg", "active transcode sessions", "list", strings.Join(tsum, "; "))
 				}
 			}
-			// Ensure we still set the transcode type (fallback/create behavior).
+			// Ensure we still set the transcode type and subtitle action (fallback/create behavior).
 			l.activeSessions.SetTranscodeType(ts.Key, kind)
+			l.activeSessions.SetSubtitleAction(ts.Key, subtitle)
 		}
 	}
 }

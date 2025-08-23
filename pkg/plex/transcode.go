@@ -14,9 +14,14 @@ func transcodeKind(ts jrplex.TranscodeSession) string {
 	vNew := strings.ToLower(strings.TrimSpace(ts.VideoCodec))
 	aSrc := strings.ToLower(strings.TrimSpace(ts.SourceAudioCodec))
 	aNew := strings.ToLower(strings.TrimSpace(ts.AudioCodec))
+	vDecision := strings.ToLower(strings.TrimSpace(ts.VideoDecision))
+	aDecision := strings.ToLower(strings.TrimSpace(ts.AudioDecision))
 
-	hasVideoChange := vNew != "" && vNew != vSrc
-	hasAudioChange := aNew != "" && aNew != aSrc
+	// If Plex explicitly reports a decision to transcode video/audio, prefer
+	// that signal (this handles cases like subtitle burn-in where the video
+	// stream is transcoded even if codec strings may look unchanged).
+	hasVideoChange := vDecision == "transcode" || (vNew != "" && vNew != vSrc)
+	hasAudioChange := aDecision == "transcode" || (aNew != "" && aNew != aSrc)
 
 	if hasVideoChange {
 		if hasAudioChange {

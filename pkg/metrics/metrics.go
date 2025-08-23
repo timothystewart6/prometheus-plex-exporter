@@ -32,6 +32,7 @@ var (
 		"user",                   // User name
 		"session",
 		"transcode_type",
+			"subtitle_action",
 	)
 
 	ServerInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -200,6 +201,7 @@ func Play(value float64, serverType, serverName, serverID,
 	streamType, streamResolution, streamFileResolution, streamBitrate,
 	device, deviceType,
 	user, session, transcodeType string,
+	subtitleAction string,
 ) prometheus.Metric {
 
 	// the last label is transcode_type; callers may pass a value such as
@@ -207,6 +209,9 @@ func Play(value float64, serverType, serverName, serverID,
 	// explicit value "none" so the label is always present and stable.
 	if transcodeType == "" {
 		transcodeType = "none"
+	}
+	if subtitleAction == "" {
+		subtitleAction = "none"
 	}
 	return prometheus.MustNewConstMetric(MetricPlayCountDesc,
 		prometheus.CounterValue,
@@ -218,6 +223,7 @@ func Play(value float64, serverType, serverName, serverID,
 		streamType, streamResolution, streamFileResolution, streamBitrate,
 		device, deviceType,
 		user, session, transcodeType,
+		subtitleAction,
 	)
 }
 
@@ -228,12 +234,16 @@ func PlayDuration(value float64, serverType, serverName, serverID,
 	streamType, streamResolution, streamFileResolution, streamBitrate,
 	device, deviceType,
 	user, session, transcodeType string,
+	subtitleAction string,
 ) prometheus.Metric {
 
 	// last label is transcode_type; emit an explicit "none" when empty so
 	// downstream aggregations and dashboards don't see an empty label value.
 	if transcodeType == "" {
 		transcodeType = "none"
+	}
+	if subtitleAction == "" {
+		subtitleAction = "none"
 	}
 	return prometheus.MustNewConstMetric(MetricPlaySecondsTotalDesc,
 		prometheus.CounterValue,
@@ -245,5 +255,6 @@ func PlayDuration(value float64, serverType, serverName, serverID,
 		streamType, streamResolution, streamFileResolution, streamBitrate,
 		device, deviceType,
 		user, session, transcodeType,
+		subtitleAction,
 	)
 }
