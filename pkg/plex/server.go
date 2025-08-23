@@ -79,9 +79,9 @@ func NewServer(serverURL, token string) (*Server, error) {
 }
 
 func (s *Server) Refresh() error {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
+	// Avoid holding s.mtx across network calls to prevent blocking the
+	// metrics scrape path. Build the refreshed state locally then copy it
+	// into the server struct under lock.
 	container := struct {
 		MediaContainer struct {
 			FriendlyName      string `json:"friendlyName"`
@@ -106,11 +106,8 @@ func (s *Server) Refresh() error {
 	if err != nil {
 		return err
 	}
-
-	s.ID = container.MediaContainer.MachineIdentifier
-	s.Name = container.MediaContainer.FriendlyName
-	s.Version = container.MediaContainer.Version
-	s.libraries = nil
+	// Build new library list and totals without holding the server lock.
+	var newLibraries []*Library
 	for _, provider := range container.MediaContainer.MediaProviders {
 		if provider.Identifier != "com.plexapp.plugins.library" {
 			continue
@@ -132,42 +129,30 @@ func (s *Server) Refresh() error {
 					Server:        s,
 				}
 
-				// Attempt to fetch the library content to obtain an
-				// instantaneous item count. Use our local Client to GET
-				// the library sections contents and decode into the
-				// vendored SearchResults type which exposes
-				// MediaContainer.Size for the count. If the call fails
-				// we'll skip setting ItemsCount to avoid hard failures.
 				var results jrplex.SearchResults
 				path := "/library/sections/" + lib.ID + "/all"
 				if err := s.Client.Get(path, &results); err == nil {
 					lib.ItemsCount = int64(results.MediaContainer.Size)
 				}
 
-				s.libraries = append(s.libraries, lib)
+				newLibraries = append(newLibraries, lib)
 			}
 		}
 	}
 
-	// Compute server-level totals for movies and episodes.
-	// Reuse the previously fetched library ItemsCount where possible to
-	// avoid duplicate requests. For 'movie' libraries, ItemsCount already
-	// reflects the number of movies in the section (from /all). For 'show'
-	// libraries we need to query with type=4 to count episodes.
+	// Compute server-level totals for movies and episodes. Parallelize
+	// episode/music queries but accumulate into locals first.
 	var moviesTotal int64
 	var episodesTotal int64
 	var musicTotal int64
 	var photosTotal int64
 	var otherVideosTotal int64
 
-	// Sum movie library counts locally (ItemsCount already fetched).
-	for _, lib := range s.libraries {
+	for _, lib := range newLibraries {
 		switch lib.Type {
 		case "movie":
 			moviesTotal += lib.ItemsCount
 		case "music":
-			// music libraries report albums in /all; we want track counts so
-			// query type=10 (track) where necessary later. For now use ItemsCount.
 			musicTotal += lib.ItemsCount
 		case "photo":
 			photosTotal += lib.ItemsCount
@@ -176,12 +161,10 @@ func (s *Server) Refresh() error {
 		}
 	}
 
-	// For show libraries, do episode counts in parallel to reduce latency.
-	// Limit concurrency with a semaphore to avoid overloading the Plex server.
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 5) // max 5 concurrent requests
-	for _, lib := range s.libraries {
+	sem := make(chan struct{}, 5)
+	for _, lib := range newLibraries {
 		if lib.Type == "show" {
 			wg.Add(1)
 			sem <- struct{}{}
@@ -198,8 +181,6 @@ func (s *Server) Refresh() error {
 			}(lib.ID)
 		}
 
-		// For music, we prefer track counts (type=10). Do additional requests
-		// in parallel similar to shows.
 		if lib.Type == "music" {
 			wg.Add(1)
 			sem <- struct{}{}
@@ -215,31 +196,30 @@ func (s *Server) Refresh() error {
 				}
 			}(lib.ID)
 		}
-
-		// Other library types (photo, homevideo) usually have ItemsCount already
-		// populated from the initial /all call, so no extra requests are needed.
 	}
 	wg.Wait()
 	close(sem)
 
+	// Update server state under lock.
+	s.mtx.Lock()
+	s.ID = container.MediaContainer.MachineIdentifier
+	s.Name = container.MediaContainer.FriendlyName
+	s.Version = container.MediaContainer.Version
+	s.libraries = newLibraries
 	s.MovieCount = moviesTotal
 	s.EpisodeCount = episodesTotal
 	s.MusicCount = musicTotal
 	s.PhotoCount = photosTotal
 	s.OtherVideoCount = otherVideosTotal
+	s.mtx.Unlock()
 
-	err = s.refreshServerInfo()
-	if err != nil {
+	if err := s.refreshServerInfo(); err != nil {
 		return err
 	}
-
-	err = s.refreshResources()
-	if err != nil {
+	if err := s.refreshResources(); err != nil {
 		return err
 	}
-
-	err = s.refreshBandwidth()
-	if err != nil {
+	if err := s.refreshBandwidth(); err != nil {
 		return err
 	}
 
