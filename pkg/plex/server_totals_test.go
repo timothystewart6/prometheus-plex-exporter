@@ -16,7 +16,7 @@ func (f *fakeTotalsRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	var body string
 	switch {
 	case req.URL.Path == "/media/providers":
-		body = `{"MediaContainer": {"friendlyName":"TotalsServer","machineIdentifier":"machine-totals","version":"1.0","MediaProvider":[{"identifier":"com.plexapp.plugins.library","Feature":[{"type":"content","Directory":[{"id":"m1","durationTotal":100,"storageTotal":100,"title":"MoviesA","type":"movie"},{"id":"m2","durationTotal":200,"storageTotal":200,"title":"MoviesB","type":"movie"},{"id":"s1","durationTotal":300,"storageTotal":300,"title":"Shows","type":"show"}]}]}]}}`
+		body = `{"MediaContainer": {"friendlyName":"TotalsServer","machineIdentifier":"machine-totals","version":"1.0","MediaProvider":[{"identifier":"com.plexapp.plugins.library","Feature":[{"type":"content","Directory":[{"id":"m1","durationTotal":100,"storageTotal":100,"title":"MoviesA","type":"movie"},{"id":"m2","durationTotal":200,"storageTotal":200,"title":"MoviesB","type":"movie"},{"id":"s1","durationTotal":300,"storageTotal":300,"title":"Shows","type":"show"},{"id":"mu1","durationTotal":0,"storageTotal":0,"title":"Music","type":"music"},{"id":"p1","durationTotal":0,"storageTotal":0,"title":"Photos","type":"photo"},{"id":"hv1","durationTotal":0,"storageTotal":0,"title":"HomeVideos","type":"homevideo"}]}]}]}}`
 	case req.URL.Path == "/library/sections/m1/all":
 		body = `{"MediaContainer":{"size":7}}`
 	case req.URL.Path == "/library/sections/m2/all":
@@ -28,6 +28,15 @@ func (f *fakeTotalsRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		// Unfiltered call used by Refresh(); return 0 to force the
 		// filtered type=4 request to be used for episode counting.
 		body = `{"MediaContainer":{"size":0}}`
+	case req.URL.Path == "/library/sections/mu1/all" && req.URL.RawQuery == "type=10":
+		// music tracks (type=10)
+		body = `{"MediaContainer":{"size":123}}`
+	case req.URL.Path == "/library/sections/mu1/all":
+		body = `{"MediaContainer":{"size":0}}`
+	case req.URL.Path == "/library/sections/p1/all":
+		body = `{"MediaContainer":{"size":55}}`
+	case req.URL.Path == "/library/sections/hv1/all":
+		body = `{"MediaContainer":{"size":9}}`
 	case req.URL.RawQuery == "":
 		// fallback
 		body = `{"MediaContainer":{}}`
