@@ -18,6 +18,27 @@ var (
 	ErrAlreadyListening = errors.New("already listening")
 )
 
+// Retry/backoff tuning variables. These are exported so callers (for
+// example `cmd/prometheus-plex-exporter/main.go` or tests) can adjust them
+// at runtime if you observe races with your Plex server.
+var (
+	// SessionLookupMaxRetries controls how many times we retry fetching the
+	// current sessions when a notification refers to a session not present
+	// in the initial listing.
+	SessionLookupMaxRetries = 3
+
+	// SessionLookupBaseDelay is the base delay for session lookup retries; the
+	// delay doubles each attempt (exponential backoff).
+	SessionLookupBaseDelay = 100 * time.Millisecond
+
+	// MetadataMaxRetries controls how many times we retry fetching metadata
+	// for a rating key when it's not immediately available.
+	MetadataMaxRetries = 3
+
+	// MetadataBaseDelay is the base delay for metadata fetch retries.
+	MetadataBaseDelay = 100 * time.Millisecond
+)
+
 // newPlex is a variable so tests can replace it with a fake constructor.
 var newPlex = plex.New
 
@@ -144,31 +165,47 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 			continue
 		}
 
+		// Try to resolve the session with exponential backoff. Notifications
+		// can arrive slightly before the session list is updated; retry a few
+		// times before giving up.
 		session := getSessionByID(sessions, n.SessionKey)
 		if session == nil {
-			// Sessions can be slightly out of date relative to notifications.
-			// Try one quick retry to reduce spurious errors.
-			if s2, err := l.conn.GetSessions(); err == nil {
-				session = getSessionByID(s2, n.SessionKey)
+			for attempt := 1; attempt <= SessionLookupMaxRetries && session == nil; attempt++ {
+				time.Sleep(SessionLookupBaseDelay * time.Duration(1<<uint(attempt-1)))
+				if s2, err := l.conn.GetSessions(); err == nil {
+					session = getSessionByID(s2, n.SessionKey)
+				} else {
+					_ = level.Debug(l.log).Log("msg", "retrying GetSessions failed", "attempt", attempt, "err", err)
+				}
 			}
 		}
 
 		if session == nil {
-			// Still not found; log and skip this notification instead of
-			// returning an error which would abort processing of remaining
-			// notifications in the batch.
-			_ = level.Warn(l.log).Log("msg", "session not found for notification, skipping", "SessionKey", n.SessionKey, "RatingKey", n.RatingKey, "state", n.State)
+			_ = level.Warn(l.log).Log("msg", "session not found for notification after retries, skipping", "SessionKey", n.SessionKey, "RatingKey", n.RatingKey, "state", n.State)
 			continue
 		}
 
-		metadata, err := l.conn.GetMetadata(n.RatingKey)
-		if err != nil {
-			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification, skipping", "RatingKey", n.RatingKey, "err", err)
+		// Fetch metadata with retries in case the server hasn't populated it yet.
+		var metadata plex.MediaMetadata
+		var metaErr error
+		for attempt := 1; attempt <= MetadataMaxRetries; attempt++ {
+			metadata, metaErr = l.conn.GetMetadata(n.RatingKey)
+			if metaErr == nil && len(metadata.MediaContainer.Metadata) > 0 {
+				break
+			}
+			// if this was the last attempt break and we'll log below
+			if attempt < MetadataMaxRetries {
+				time.Sleep(MetadataBaseDelay * time.Duration(1<<uint(attempt-1)))
+			}
+		}
+
+		if metaErr != nil {
+			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification after retries, skipping", "RatingKey", n.RatingKey, "err", metaErr)
 			continue
 		}
 
 		if len(metadata.MediaContainer.Metadata) == 0 {
-			_ = level.Warn(l.log).Log("msg", "metadata response empty, skipping", "RatingKey", n.RatingKey)
+			_ = level.Warn(l.log).Log("msg", "metadata response empty after retries, skipping", "RatingKey", n.RatingKey)
 			continue
 		}
 
