@@ -11,7 +11,7 @@ github.com/go-kit/log/level
 # github.com/go-logfmt/logfmt v0.5.1
 ## explicit; go 1.17
 github.com/go-logfmt/logfmt
-# github.com/google/uuid v1.3.0
+# github.com/google/uuid v1.6.0
 ## explicit
 github.com/google/uuid
 # github.com/gorilla/websocket v1.5.3
@@ -41,8 +41,8 @@ github.com/prometheus/common/model
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
-# github.com/timothystewart6/go-plex-client v0.0.0-20250823231744-bab8e0fbc91d
-## explicit; go 1.12
+# github.com/timothystewart6/go-plex-client v0.0.0-20250824041037-9ab10010738e
+## explicit; go 1.21
 github.com/timothystewart6/go-plex-client
 # golang.org/x/sys v0.33.0
 ## explicit; go 1.23.0
