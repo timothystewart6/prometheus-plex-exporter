@@ -230,7 +230,7 @@ services:
 
 ## Acknowledgments
 
-- [jsclayton/prometheus-plex-exporter](hhttps://github.com/jsclayton/prometheus-plex-exporter) - The original repo this was forked from
+- [jsclayton/prometheus-plex-exporter](https://github.com/jsclayton/prometheus-plex-exporter) - The original repo this was forked from
 - [Prometheus](https://prometheus.io) - The monitoring solution
 - [Grafana](https://grafana.com) - The visualization platform
 - All our [contributors](https://github.com/timothystewart6/prometheus-plex-exporter/graphs/contributors)
