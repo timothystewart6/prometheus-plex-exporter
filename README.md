@@ -1,12 +1,14 @@
 # Prometheus Plex Exporter
 
-![Prometheus Plex Exporter](assets/logo.png)
-
-**Expose Plex media server metrics in Prometheus format**
-
-[![CI](https://github.com/timothystewart6/prometheus-plex-exporter/workflows/CI/badge.svg)](https://github.com/timothystewart6/prometheus-plex-exporter/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/timothystewart6/prometheus-plex-exporter)](https://goreportcard.com/report/github.com/timothystewart6/prometheus-plex-exporter)
-[![GHCR](https://img.shields.io/badge/ghcr.io-timothystewart6%2Fprometheus--plex--exporter-blue)](https://github.com/timothystewart6/prometheus-plex-exporter/pkgs/container/prometheus-plex-exporter)
+<div align="center">
+  <img src="assets/logo.png" alt="Prometheus Plex Exporter" width="250">
+  
+  **Expose Plex media server metrics in Prometheus format**
+  
+  [![CI](https://github.com/timothystewart6/prometheus-plex-exporter/workflows/CI/badge.svg)](https://github.com/timothystewart6/prometheus-plex-exporter/actions)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/timothystewart6/prometheus-plex-exporter)](https://goreportcard.com/report/github.com/timothystewart6/prometheus-plex-exporter)
+  [![GHCR](https://img.shields.io/badge/ghcr.io-timothystewart6%2Fprometheus--plex--exporter-blue)](https://github.com/timothystewart6/prometheus-plex-exporter/pkgs/container/prometheus-plex-exporter)
+</div>
 
 ---
 
