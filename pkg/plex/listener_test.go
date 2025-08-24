@@ -1,5 +1,10 @@
 package plex
 
+// NOTE: Test fixtures in this file use randomized/sanitized identifiers
+// (session keys, transcode keys, machine identifiers, user/player names).
+// These values mimic the shape of real Plex data so matching logic is
+// exercised without containing production-identifying information.
+
 import (
 	"bytes"
 	"context"
@@ -417,6 +422,118 @@ func TestOnPlayingHandlerSuccess(t *testing.T) {
 	if _, ok := l.activeSessions.sessions["sess1"]; !ok {
 		t.Fatalf("expected session sess1 to be present")
 	}
+}
+
+// Reproduce the runtime scenario where transcode updates arrive as
+// "/transcode/sessions/<uuid>" and initially do not match the map key.
+// The listener should log a warning with knownSessions and eventually map
+// the transcode update to the correct session (via part keys or suffix match).
+func TestOnTranscodeUpdate_UnmatchedThenMatched(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	var buf bytes.Buffer
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
+
+	// activeSessions with two numeric map keys: 350 and 351
+	sessStore := &sessions{sessions: map[string]session{}, server: s}
+
+	// session 350 references transcode id 41ee... in a media part
+	m350 := ttPlex.Metadata{SessionKey: "350", User: ttPlex.User{Title: "userA"}, Player: ttPlex.Player{Product: "Plex Web"}, Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53/file.m3u8"}}}}}
+	// session 351 references transcode id 0yqi... in a media part
+	m351 := ttPlex.Metadata{SessionKey: "351", User: ttPlex.User{Title: "userB"}, Player: ttPlex.Player{Product: "Plex for Vizio"}, Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg/segment.m3u8"}}}}}
+
+	sessStore.mtx.Lock()
+	sessStore.sessions["350"] = session{session: m350, state: statePlaying, playStarted: time.Now()}
+	sessStore.sessions["351"] = session{session: m351, state: statePlaying, playStarted: time.Now()}
+	sessStore.mtx.Unlock()
+
+	l := &plexListener{server: s, conn: &fakePlex{}, activeSessions: sessStore, log: logger}
+
+	// Send a transcode update that uses the full path for 41ee... (both audio+video)
+	c1 := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53", VideoDecision: "transcode", AudioDecision: "transcode"}}}
+	l.onTranscodeUpdateHandler(c1)
+
+	out := buf.String()
+	// Expect the initial unmatched warning and deterministic knownSessions listing
+	expectedKnown := "mapKey=350 sessionKey=350 user=userA player=Plex Web; mapKey=351 sessionKey=351 user=userB player=Plex for Vizio"
+	if !bytes.Contains(buf.Bytes(), []byte("knownSessions")) {
+		t.Fatalf("expected knownSessions in log after unmatched transcode update, got: %s", out)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(expectedKnown)) {
+		t.Fatalf("expected knownSessions to equal %q, got: %s", expectedKnown, out)
+	}
+
+	// Clear buffer and send a raw transcode key (no prefix) for 0yqi... which should match session 351
+	buf.Reset()
+	c2 := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "0yqiuxt8q0ahpntewa4ee6bg", VideoDecision: "transcode", AudioDecision: "transcode"}}}
+	l.onTranscodeUpdateHandler(c2)
+
+	out2 := buf.String()
+	if !bytes.Contains([]byte(out2), []byte("transcode session update")) {
+		t.Fatalf("expected transcode session update log for raw key, got: %s", out2)
+	}
+
+	// Verify the transcode type was set on both sessions via TrySetTranscodeType
+	sessStore.mtx.Lock()
+	ts350 := sessStore.sessions["350"].transcodeType
+	ts351 := sessStore.sessions["351"].transcodeType
+	sessStore.mtx.Unlock()
+
+	if ts350 != "both" {
+		t.Fatalf("expected session 350 transcodeType=both, got %q", ts350)
+	}
+	if ts351 != "both" {
+		t.Fatalf("expected session 351 transcodeType=both, got %q", ts351)
+	}
+}
+
+// Check both raw key and full-path forms map to the same session when parts contain the transcode ID
+func TestOnTranscodeUpdate_RawAndFullKeyForms(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	var buf bytes.Buffer
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
+
+	sessStore := &sessions{sessions: map[string]session{}, server: s}
+	// Session references transcode id 'jtwrf79e85c0a1m1yhntlkow'
+	m := ttPlex.Metadata{SessionKey: "99", User: ttPlex.User{Title: "u"}, Player: ttPlex.Player{Product: "p"}, Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/jtwrf79e85c0a1m1yhntlkow"}}}}}
+
+	sessStore.mtx.Lock()
+	sessStore.sessions["99"] = session{session: m, state: statePlaying, playStarted: time.Now()}
+	sessStore.mtx.Unlock()
+
+	l := &plexListener{server: s, conn: &fakePlex{}, activeSessions: sessStore, log: logger}
+
+	// raw key
+	buf.Reset()
+	cRaw := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "jtwrf79e85c0a1m1yhntlkow", VideoDecision: "transcode", AudioDecision: "transcode"}}}
+	l.onTranscodeUpdateHandler(cRaw)
+	if !bytes.Contains(buf.Bytes(), []byte("transcode session update")) {
+		t.Fatalf("expected transcode session update for raw key, got: %s", buf.String())
+	}
+
+	sessStore.mtx.Lock()
+	ss := sessStore.sessions["99"]
+	if ss.transcodeType != "both" {
+		sessStore.mtx.Unlock()
+		t.Fatalf("expected transcodeType=both for session 99 after raw key, got %q", ss.transcodeType)
+	}
+	// reset for full path
+	ss.transcodeType = ""
+	sessStore.sessions["99"] = ss
+	sessStore.mtx.Unlock()
+
+	// full path
+	buf.Reset()
+	cFull := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "/transcode/sessions/jtwrf79e85c0a1m1yhntlkow", VideoDecision: "transcode", AudioDecision: "transcode"}}}
+	l.onTranscodeUpdateHandler(cFull)
+	if !bytes.Contains(buf.Bytes(), []byte("transcode session update")) {
+		t.Fatalf("expected transcode session update for full path, got: %s", buf.String())
+	}
+
+	sessStore.mtx.Lock()
+	if sessStore.sessions["99"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for session 99 after full path, got %q", sessStore.sessions["99"].transcodeType)
+	}
+	sessStore.mtx.Unlock()
 }
 
 // TestOnPlayingHandlerError tests the error handling path of onPlayingHandler.

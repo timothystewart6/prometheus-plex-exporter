@@ -1,5 +1,8 @@
 package plex
 
+// NOTE: Test fixtures here use sanitized identifiers (e.g. "ID123") so tests
+// exercise parsing without containing real customer data.
+
 import (
 	"context"
 	"errors"

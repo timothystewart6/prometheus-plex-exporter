@@ -209,12 +209,34 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 		sessionID = extractTranscodeSessionID(sessionID)
 	}
 
+	// Helper: return last path segment for loose/suffix matching
+	lastSeg := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		if strings.Contains(p, "/") {
+			parts := strings.Split(p, "/")
+			return parts[len(parts)-1]
+		}
+		return p
+	}
+
 	if ss, ok := s.sessions[sessionID]; ok {
 		ss.transcodeType = ttype
 		s.sessions[sessionID] = ss
 		return true
 	}
 
+	// Exact match against stored map key
+	for k, ss := range s.sessions {
+		if k == sessionID {
+			ss.transcodeType = ttype
+			s.sessions[k] = ss
+			return true
+		}
+	}
+
+	// Exact match against inner SessionKey
 	for k, ss := range s.sessions {
 		if ss.session.SessionKey == sessionID {
 			ss.transcodeType = ttype
@@ -223,11 +245,19 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 		}
 	}
 
+	// Suffix/last-segment tolerant matching: compare last segments both ways
 	for k, ss := range s.sessions {
-		if ss.session.SessionKey != "" && (strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID)) {
-			ss.transcodeType = ttype
-			s.sessions[k] = ss
-			return true
+		if ss.session.SessionKey != "" {
+			if lastSeg(sessionID) == lastSeg(ss.session.SessionKey) {
+				ss.transcodeType = ttype
+				s.sessions[k] = ss
+				return true
+			}
+			if strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID) {
+				ss.transcodeType = ttype
+				s.sessions[k] = ss
+				return true
+			}
 		}
 	}
 
@@ -235,25 +265,34 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 	// matches any transcode session keys embedded in the session data.
 	// This handles cases where websocket sends keys like "abc123" or "/transcode/sessions/abc123" but
 	// session data contains transcode session paths like "/transcode/sessions/abc123".
+	// Prefer play-session transcode keys found in media parts: treat these as authoritative
 	for k, ss := range s.sessions {
-		if len(ss.session.Media) > 0 {
-			for _, media := range ss.session.Media {
-				for _, part := range media.Part {
-					// Check if part.Key contains a transcode session path that matches
-					if strings.Contains(part.Key, "/transcode/sessions/") {
-						// Extract the session ID from the path
-						if pathSessionID := extractTranscodeSessionID(part.Key); pathSessionID == sessionID {
+		if len(ss.session.Media) == 0 {
+			continue
+		}
+		for _, media := range ss.session.Media {
+			for _, part := range media.Part {
+				if part.Key == "" {
+					continue
+				}
+
+				// If the media part contains a transcode sessions path, prefer that mapping
+				if strings.Contains(part.Key, "/transcode/sessions/") {
+					partID := extractTranscodeSessionID(part.Key)
+					if partID != "" {
+						if partID == sessionID || partID == originalSessionID || lastSeg(partID) == lastSeg(sessionID) {
 							ss.transcodeType = ttype
 							s.sessions[k] = ss
 							return true
 						}
 					}
-					// Also check if the full original path matches part.Key directly
-					if originalSessionID != sessionID && part.Key == originalSessionID {
-						ss.transcodeType = ttype
-						s.sessions[k] = ss
-						return true
-					}
+				}
+
+				// Direct match against original full path
+				if originalSessionID != sessionID && part.Key == originalSessionID {
+					ss.transcodeType = ttype
+					s.sessions[k] = ss
+					return true
 				}
 			}
 		}

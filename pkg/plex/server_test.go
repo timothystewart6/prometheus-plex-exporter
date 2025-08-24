@@ -1,5 +1,9 @@
 package plex
 
+// NOTE: Test fixtures in this file use synthetic/sanitized machine identifiers
+// and other sample values. They are intentionally non-production while
+// resembling real data shapes for parsing and logic tests.
+
 import (
 	"bytes"
 	"io"

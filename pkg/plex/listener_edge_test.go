@@ -1,5 +1,8 @@
 package plex
 
+// NOTE: Test fixtures in this file use randomized/sanitized session keys and
+// related identifiers to keep tests realistic but non-identifying.
+
 import (
 	"sync"
 	"testing"

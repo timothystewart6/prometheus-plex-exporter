@@ -1,5 +1,8 @@
 package plex
 
+// NOTE: Test fixtures in this file use synthetic/sanitized session keys and
+// other identifiers so tests exercise collection logic without real data.
+
 import (
 	"context"
 	"testing"

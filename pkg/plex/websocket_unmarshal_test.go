@@ -1,5 +1,8 @@
 package plex
 
+// NOTE: Payloads and identifiers in this test are synthetic and sanitized to
+// avoid using real identifiers while preserving realistic message shapes.
+
 import (
 	"encoding/json"
 	"testing"

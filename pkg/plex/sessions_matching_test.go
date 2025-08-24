@@ -1,5 +1,10 @@
 package plex
 
+// NOTE: Test fixtures in this file use randomized/sanitized identifiers
+// (session keys, transcode keys, etc.). These values mimic the shape of real
+// Plex data so matching logic is exercised without containing
+// production-identifying information.
+
 import (
 	"context"
 	"testing"
@@ -158,6 +163,87 @@ func TestSetSubtitleAction_InnerSubstringAndFallback(t *testing.T) {
 	s.mtx.Lock()
 	if s.sessions["new-session-key"].subtitleAction != "copy" {
 		t.Fatalf("expected subtitleAction=copy for newly created session entry, got %q", s.sessions["new-session-key"].subtitleAction)
+	}
+	s.mtx.Unlock()
+}
+
+// Reproduce reported real-world keys: ensure transcode session paths map to
+// the numeric session map keys and that media.Part keys containing
+// "/transcode/sessions/<id>" are preferred when matching.
+func TestTrySetTranscodeType_TranscodePathMatchesNumericSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Example numeric map keys representing session IDs observed in logs
+	// mapKey=350 and mapKey=351 with inner SessionKey equal to the same numeric id
+	m350 := ttPlex.Metadata{SessionKey: "350", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d"}}}}}
+	m351 := ttPlex.Metadata{SessionKey: "351", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg"}}}}}
+
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350}
+	s.sessions["351"] = session{session: m351}
+	s.mtx.Unlock()
+
+	// Incoming transcode update uses the full transcode path from websocket
+	applied1 := s.TrySetTranscodeType("/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d", "both")
+	if !applied1 {
+		t.Fatalf("expected TrySetTranscodeType to match transcode path to session 350")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for session 350, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// Another transcode update should match session 351 via its part key
+	applied2 := s.TrySetTranscodeType("/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg", "video")
+	if !applied2 {
+		t.Fatalf("expected TrySetTranscodeType to match transcode path to session 351")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["351"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for session 351, got %q", s.sessions["351"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+// Ensure TrySetTranscodeType matches when incoming keys are either the
+// raw key (e.g. "0yqi...") or the full path ("/transcode/sessions/0yqi...").
+func TestTrySetTranscodeType_MixedKeyForms(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// session 350 has a media part that references a transcode session path
+	m350 := ttPlex.Metadata{SessionKey: "350", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg"}}}}}
+	// session 351 references a different transcode path
+	m351 := ttPlex.Metadata{SessionKey: "351", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53"}}}}}
+
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350}
+	s.sessions["351"] = session{session: m351}
+	s.mtx.Unlock()
+
+	// incoming raw key (no leading path) should match session 350
+	if !s.TrySetTranscodeType("0yqiuxt8q0ahpntewa4ee6bg", "both") {
+		t.Fatalf("expected raw transcode key to match session 350")
+	}
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for 350, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// incoming full path should match session 351
+	if !s.TrySetTranscodeType("/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53", "video") {
+		t.Fatalf("expected full transcode path to match session 351")
+	}
+	s.mtx.Lock()
+	if s.sessions["351"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for 351, got %q", s.sessions["351"].transcodeType)
 	}
 	s.mtx.Unlock()
 }

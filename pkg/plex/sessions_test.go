@@ -1,5 +1,9 @@
 package plex
 
+// NOTE: Test fixtures in this file use synthetic session keys and identifiers
+// (e.g. "session-1", "older-session"). These are intentionally non-production
+// values used to validate matching and collection logic.
+
 import (
 	"context"
 	"testing"
@@ -503,7 +507,7 @@ func TestTrySetTranscodeTypeWithFullPath(t *testing.T) {
 			VideoResolution: "720p",
 			Part: []ttPlex.Part{{
 				Decision: "transcode",
-				Key:      "/transcode/sessions/fse26of3focw33mqyua0aity/file.m3u8",
+				Key:      "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53/file.m3u8",
 			}},
 		}},
 		Player: ttPlex.Player{Device: "dev", Product: "plex-player"},
@@ -514,8 +518,8 @@ func TestTrySetTranscodeTypeWithFullPath(t *testing.T) {
 	s.sessions["session-1"] = ss
 
 	// Test that TrySetTranscodeType matches when websocket sends the FULL PATH
-	// This is what we're seeing in the logs: tsKey=/transcode/sessions/fse26of3focw33mqyua0aity
-	websocketFullPath := "/transcode/sessions/fse26of3focw33mqyua0aity"
+	// This is what we're seeing in the logs: tsKey=/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53
+	websocketFullPath := "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53"
 	result := s.TrySetTranscodeType(websocketFullPath, "both")
 
 	if !result {

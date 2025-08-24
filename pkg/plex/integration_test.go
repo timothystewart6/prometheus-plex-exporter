@@ -1,5 +1,9 @@
 package plex
 
+// NOTE: Test fixtures in this file use randomized/sanitized identifiers such
+// as session keys and transcode IDs to avoid leaking real identifiers while
+// preserving realistic shapes for matching logic.
+
 import (
 	"context"
 	"strings"
@@ -44,7 +48,8 @@ func createMockPlexData() mockPlexData {
 	return mockPlexData{
 		server: mockServerInfo{
 			friendlyName:      "Plex Server",
-			machineIdentifier: "a7f3b2c8e9d1456789abcdef0123456789fedcba9",
+			// sanitized mock machine identifier
+			machineIdentifier: "mock-machine-id",
 			version:           "1.32.5.123",
 		},
 		sessions: []mockSession{
@@ -494,7 +499,7 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 			VideoResolution: "1080p",
 			Part: []ttPlex.Part{{
 				Decision: "transcode",
-				Key:      "/transcode/sessions/abc123transcodekey/file.m3u8", // This contains the websocket transcode session ID
+				Key:      "/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d/file.m3u8", // contains example transcode session ID
 			}},
 		}},
 	}
@@ -543,7 +548,8 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 	t.Run("TranscodeSessionPathMatching", func(t *testing.T) {
 		// Test the new enhanced matching: websocket transcode session ID should match
 		// against the transcode session ID embedded in the Part.Key path
-		websocketTranscodeSessionID := "abc123transcodekey"
+	// use the same ID referenced in the session Part.Key above
+	websocketTranscodeSessionID := "7bbacc88-6c95-4279-9b6d-f5a2352b665d"
 		result := sess.TrySetTranscodeType(websocketTranscodeSessionID, "hw")
 
 		if !result {
@@ -672,7 +678,7 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 					},
 					{
 						Decision: "transcode",
-						Key:      "/transcode/sessions/multikey123/segment.m3u8",
+						Key:      "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg/segment.m3u8",
 					},
 				},
 			}},
@@ -688,10 +694,10 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 		sess.Update("session-multi-id", statePlaying, &sessionMulti, &mediaMulti)
 
 		// Test matching against the transcode session in the second part
-		result := sess.TrySetTranscodeType("multikey123", "video")
+	result := sess.TrySetTranscodeType("0yqiuxt8q0ahpntewa4ee6bg", "video")
 
 		if !result {
-			t.Fatal("TrySetTranscodeType should have found a match for multikey123 in multi-part session")
+			t.Fatal("TrySetTranscodeType should have found a match for 0yqiuxt8q0ahpntewa4ee6bg in multi-part session")
 		}
 
 		// Verify the session was updated
@@ -710,7 +716,7 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 
 	t.Run("WebsocketFullPathMatching", func(t *testing.T) {
 		// Test the specific case from the user's logs where websocket sends full paths
-		// like tsKey=/transcode/sessions/fse26of3focw33mqyua0aity
+	// like tsKey=/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53
 		sessionFullPath := ttPlex.Metadata{
 			SessionKey: "session-fullpath",
 			User: ttPlex.User{
@@ -728,7 +734,7 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 				VideoResolution: "1080p",
 				Part: []ttPlex.Part{{
 					Decision: "transcode",
-					Key:      "/transcode/sessions/fse26of3focw33mqyua0aity/file.m3u8",
+					Key:      "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53/file.m3u8",
 				}},
 			}},
 		}
@@ -743,7 +749,7 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 		sess.Update("session-fullpath-id", statePlaying, &sessionFullPath, &mediaFullPath)
 
 		// Test matching against the FULL websocket path (what we see in logs)
-		websocketFullPath := "/transcode/sessions/fse26of3focw33mqyua0aity"
+	websocketFullPath := "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53"
 		result := sess.TrySetTranscodeType(websocketFullPath, "both")
 
 		if !result {

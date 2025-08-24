@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -197,6 +198,12 @@ func (l *plexListener) onTimelineHandler(c plex.NotificationContainer) {
 // onTranscodeUpdateHandler receives TranscodeSession updates and logs a concise
 // transcode type (audio/video/both). We avoid sending nested structs to the
 // logger and only emit primitive fields.
+//
+// Note: example keys and fixture data shown in tests and examples are
+// randomized/sanitized values that resemble real Plex identifiers but do not
+// contain customer-identifying information. Tests and documentation intentionally
+// use synthetic keys that are similar in shape to real data to exercise
+// matching logic without exposing production identifiers.
 func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 	if len(c.TranscodeSession) == 0 {
 		return
@@ -252,14 +259,45 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 
 		// diagnostics and transcode sessions API fallback
 		if l.conn != nil {
-			if sessions, err := l.conn.GetSessions(); err == nil {
+			// Build known sessions list from our in-memory store so logs include
+			// both the map key and the inner SessionKey used in the metadata.
+			if l.activeSessions != nil {
+				// Build a concise known-sessions summary for diagnostics. Note that
+				// tests and README examples intentionally populate session keys,
+				// names, and user titles with randomized/sanitized values
+				// (they mimic real-world shapes like numeric session keys or
+				// UUID-like transcode IDs) so logs and test output don't leak
+				// identifying information while keeping matching behavior
+				// realistic.
 				var ssum []string
-				for _, sess := range sessions.MediaContainer.Metadata {
-					ssum = append(ssum, fmt.Sprintf("k=%s user=%s player=%s", sess.SessionKey, sess.User.Title, sess.Player.Product))
+				l.activeSessions.mtx.Lock()
+				// Determine a stable ordering of sessions for deterministic logs
+				var keys []string
+				for k := range l.activeSessions.sessions {
+					keys = append(keys, k)
 				}
+				l.activeSessions.mtx.Unlock()
+
+				// sort keys outside the activeSessions lock to minimize lock hold time
+				if len(keys) > 1 {
+					// import sort at top of file
+					// ...existing code...
+					// sort keys to ensure deterministic output
+					sort.Strings(keys)
+				}
+
+				l.activeSessions.mtx.Lock()
+				for _, k := range keys {
+					ss := l.activeSessions.sessions[k]
+					user := ss.session.User.Title
+					player := ss.session.Player.Product
+					inner := ss.session.SessionKey
+					ssum = append(ssum, fmt.Sprintf("mapKey=%s sessionKey=%s user=%s player=%s", k, inner, user, player))
+				}
+				l.activeSessions.mtx.Unlock()
 				_ = level.Warn(l.log).Log("msg", "transcode update did not match any active session", "tsKey", ts.Key, "detectedKind", kind, "knownSessions", strings.Join(ssum, "; "))
 			} else {
-				_ = level.Warn(l.log).Log("msg", "transcode update match failed and GetSessions failed", "tsKey", ts.Key, "err", err)
+				_ = level.Warn(l.log).Log("msg", "transcode update did not match and activeSessions is nil", "tsKey", ts.Key, "detectedKind", kind)
 			}
 
 			if tcs, err := l.conn.GetTranscodeSessions(); err == nil {
