@@ -528,3 +528,144 @@ func TestTrySetTranscodeTypeWithFullPath(t *testing.T) {
 		t.Fatalf("expected transcodeType to be 'both', got %s", updatedSession.transcodeType)
 	}
 }
+
+func TestTrySetTranscodeTypeEnhancedHeuristics(t *testing.T) {
+	s := &sessions{
+		sessions: map[string]session{},
+		server: &Server{
+			Name: "test-server",
+			ID:   "srv-1",
+		},
+	}
+
+	now := time.Now()
+
+	// Test case 1: Single transcoding session should get the update
+	t.Run("SingleTranscodingSession", func(t *testing.T) {
+		s.sessions = map[string]session{} // Reset
+
+		// Create one transcoding session
+		ss1 := session{
+			playStarted:         now.Add(-10 * time.Second),
+			state:               statePlaying,
+			resolvedLibraryName: "lib",
+			resolvedLibraryID:   "1",
+			resolvedLibraryType: "movie",
+			session: ttPlex.Metadata{
+				SessionKey: "session-1",
+				Media: []ttPlex.Media{{
+					Part: []ttPlex.Part{{
+						Decision: "transcode",
+						Key:      "/library/parts/123",
+					}},
+				}},
+				Player: ttPlex.Player{Device: "dev1", Product: "plex-player"},
+				User:   ttPlex.User{Title: "user1"},
+			},
+		}
+
+		// Create one directplay session (should not get the update)
+		ss2 := session{
+			playStarted:         now.Add(-5 * time.Second),
+			state:               statePlaying,
+			resolvedLibraryName: "lib",
+			resolvedLibraryID:   "1",
+			resolvedLibraryType: "movie",
+			session: ttPlex.Metadata{
+				SessionKey: "session-2",
+				Media: []ttPlex.Media{{
+					Part: []ttPlex.Part{{
+						Decision: "directplay",
+						Key:      "/library/parts/456",
+					}},
+				}},
+				Player: ttPlex.Player{Device: "dev2", Product: "plex-player"},
+				User:   ttPlex.User{Title: "user2"},
+			},
+		}
+
+		s.sessions["session-1"] = ss1
+		s.sessions["session-2"] = ss2
+
+		// Test with unknown transcode session ID - should apply to the single transcoding session
+		result := s.TrySetTranscodeType("unknown-transcode-session", "hw")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found the single transcoding session")
+		}
+
+		// Verify only the transcoding session was updated
+		if s.sessions["session-1"].transcodeType != "hw" {
+			t.Errorf("Expected session-1 transcodeType to be 'hw', got %s", s.sessions["session-1"].transcodeType)
+		}
+
+		if s.sessions["session-2"].transcodeType == "hw" {
+			t.Error("session-2 should not have been updated (it's directplay)")
+		}
+	})
+
+	// Test case 2: Multiple transcoding sessions - should update the most recent one
+	t.Run("MultipleTranscodingSessions", func(t *testing.T) {
+		s.sessions = map[string]session{} // Reset
+
+		// Create older transcoding session
+		ss1 := session{
+			playStarted:         now.Add(-20 * time.Second),
+			state:               statePlaying,
+			resolvedLibraryName: "lib",
+			resolvedLibraryID:   "1",
+			resolvedLibraryType: "movie",
+			session: ttPlex.Metadata{
+				SessionKey: "older-session",
+				Media: []ttPlex.Media{{
+					Part: []ttPlex.Part{{
+						Decision: "transcode",
+						Key:      "/library/parts/111",
+					}},
+				}},
+				Player: ttPlex.Player{Device: "dev1", Product: "plex-player"},
+				User:   ttPlex.User{Title: "user1"},
+			},
+		}
+
+		// Create newer transcoding session (should get the update)
+		ss2 := session{
+			playStarted:         now.Add(-5 * time.Second),
+			state:               statePlaying,
+			resolvedLibraryName: "lib",
+			resolvedLibraryID:   "1",
+			resolvedLibraryType: "movie",
+			session: ttPlex.Metadata{
+				SessionKey: "newer-session",
+				Media: []ttPlex.Media{{
+					Part: []ttPlex.Part{{
+						Decision: "transcode",
+						Key:      "/library/parts/222",
+					}},
+				}},
+				Player: ttPlex.Player{Device: "dev2", Product: "plex-player"},
+				User:   ttPlex.User{Title: "user2"},
+			},
+		}
+
+		s.sessions["older-session"] = ss1
+		s.sessions["newer-session"] = ss2
+
+		// Test with unknown transcode session ID - should apply to the most recent transcoding session
+		result := s.TrySetTranscodeType("unknown-transcode-session", "video")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found the most recent transcoding session")
+		}
+
+		// Verify the newer session was updated
+		if s.sessions["newer-session"].transcodeType != "video" {
+			t.Errorf("Expected newer-session transcodeType to be 'video', got %s", s.sessions["newer-session"].transcodeType)
+		}
+
+		// Verify the older session was not updated
+		if s.sessions["older-session"].transcodeType == "video" {
+			t.Error("older-session should not have been updated")
+		}
+	})
+}

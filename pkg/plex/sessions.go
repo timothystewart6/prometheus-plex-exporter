@@ -265,17 +265,50 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 	// websocket transcode key doesn't map directly to our session map
 	// keys but the server is clearly performing a transcode for a
 	// session we already track.
-	applied := false
+	//
+	// Enhanced heuristic: try multiple strategies in order of preference
+
+	// Strategy 1: Apply to any single transcoding session if there's only one
+	transcodingSessions := []string{}
 	for k, ss := range s.sessions {
 		if len(ss.session.Media) > 0 && len(ss.session.Media[0].Part) > 0 {
 			if ss.session.Media[0].Part[0].Decision == "transcode" {
-				ss.transcodeType = ttype
-				s.sessions[k] = ss
-				applied = true
+				transcodingSessions = append(transcodingSessions, k)
 			}
 		}
 	}
-	return applied
+
+	// If there's exactly one transcoding session, apply the update to it
+	if len(transcodingSessions) == 1 {
+		k := transcodingSessions[0]
+		ss := s.sessions[k]
+		ss.transcodeType = ttype
+		s.sessions[k] = ss
+		return true
+	}
+
+	// Strategy 2: Apply to most recent session if we have multiple transcoding sessions
+	if len(transcodingSessions) > 1 {
+		var mostRecentKey string
+		var mostRecentTime time.Time
+
+		for _, k := range transcodingSessions {
+			ss := s.sessions[k]
+			if ss.playStarted.After(mostRecentTime) {
+				mostRecentTime = ss.playStarted
+				mostRecentKey = k
+			}
+		}
+
+		if mostRecentKey != "" {
+			ss := s.sessions[mostRecentKey]
+			ss.transcodeType = ttype
+			s.sessions[mostRecentKey] = ss
+			return true
+		}
+	}
+
+	return false
 }
 
 // extractTranscodeSessionID extracts the session ID from a transcode session path.
