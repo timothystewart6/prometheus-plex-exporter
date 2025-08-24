@@ -26,3 +26,6 @@ go.work*
 .env
 bin/
 tmp/
+
+# binary name
+prometheus-plex-exporter
