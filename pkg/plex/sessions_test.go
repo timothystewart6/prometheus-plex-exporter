@@ -477,3 +477,54 @@ func TestTrySetTranscodeTypeWithTranscodeSessionPath(t *testing.T) {
 		t.Fatalf("expected transcodeType to be 'hw', got %s", updatedSession.transcodeType)
 	}
 }
+
+func TestTrySetTranscodeTypeWithFullPath(t *testing.T) {
+	s := &sessions{
+		sessions: map[string]session{},
+		server: &Server{
+			Name: "test-server",
+			ID:   "srv-1",
+		},
+	}
+
+	// Create a session with a transcode session path in the Part.Key field
+	ss := session{}
+	ss.playStarted = time.Now().Add(-5 * time.Second)
+	ss.state = statePlaying
+	ss.resolvedLibraryName = "lib"
+	ss.resolvedLibraryID = "1"
+	ss.resolvedLibraryType = "movie"
+
+	// Simulate session data where Part.Key contains a transcode session path
+	ss.session = ttPlex.Metadata{
+		SessionKey: "different-session-key",
+		Media: []ttPlex.Media{{
+			Bitrate:         1000,
+			VideoResolution: "720p",
+			Part: []ttPlex.Part{{
+				Decision: "transcode",
+				Key:      "/transcode/sessions/fse26of3focw33mqyua0aity/file.m3u8",
+			}},
+		}},
+		Player: ttPlex.Player{Device: "dev", Product: "plex-player"},
+		User:   ttPlex.User{Title: "alice"},
+	}
+
+	// Add session to the map
+	s.sessions["session-1"] = ss
+
+	// Test that TrySetTranscodeType matches when websocket sends the FULL PATH
+	// This is what we're seeing in the logs: tsKey=/transcode/sessions/fse26of3focw33mqyua0aity
+	websocketFullPath := "/transcode/sessions/fse26of3focw33mqyua0aity"
+	result := s.TrySetTranscodeType(websocketFullPath, "both")
+
+	if !result {
+		t.Fatalf("TrySetTranscodeType should have found a match for full transcode session path %s", websocketFullPath)
+	}
+
+	// Verify the transcode type was set correctly
+	updatedSession := s.sessions["session-1"]
+	if updatedSession.transcodeType != "both" {
+		t.Fatalf("expected transcodeType to be 'both', got %s", updatedSession.transcodeType)
+	}
+}

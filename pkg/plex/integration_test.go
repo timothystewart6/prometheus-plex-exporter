@@ -707,6 +707,62 @@ func TestIntegration_TranscodeSessionMatching(t *testing.T) {
 			t.Errorf("Expected transcodeType to be 'video', got %s", session.transcodeType)
 		}
 	})
+
+	t.Run("WebsocketFullPathMatching", func(t *testing.T) {
+		// Test the specific case from the user's logs where websocket sends full paths
+		// like tsKey=/transcode/sessions/fse26of3focw33mqyua0aity
+		sessionFullPath := ttPlex.Metadata{
+			SessionKey: "session-fullpath",
+			User: ttPlex.User{
+				Title: "FullPathUser",
+			},
+			Player: ttPlex.Player{
+				Platform: "OSX",
+				Product:  "Plex Web",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Full Path Test Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         8000,
+				VideoResolution: "1080p",
+				Part: []ttPlex.Part{{
+					Decision: "transcode",
+					Key:      "/transcode/sessions/fse26of3focw33mqyua0aity/file.m3u8",
+				}},
+			}},
+		}
+
+		mediaFullPath := ttPlex.Metadata{
+			RatingKey:        "rating-fullpath",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Full Path Test Movie",
+		}
+
+		sess.Update("session-fullpath-id", statePlaying, &sessionFullPath, &mediaFullPath)
+
+		// Test matching against the FULL websocket path (what we see in logs)
+		websocketFullPath := "/transcode/sessions/fse26of3focw33mqyua0aity"
+		result := sess.TrySetTranscodeType(websocketFullPath, "both")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for full websocket path")
+		}
+
+		// Verify the session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-fullpath-id"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-fullpath-id should exist")
+		}
+
+		if session.transcodeType != "both" {
+			t.Errorf("Expected transcodeType to be 'both', got %s", session.transcodeType)
+		}
+	})
 }
 
 func TestTranscodeKind_RealWorldScenarios(t *testing.T) {

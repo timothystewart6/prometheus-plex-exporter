@@ -203,6 +203,12 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
+	// If sessionID is a full transcode session path, extract just the session ID part
+	originalSessionID := sessionID
+	if strings.HasPrefix(sessionID, "/transcode/sessions/") {
+		sessionID = extractTranscodeSessionID(sessionID)
+	}
+
 	if ss, ok := s.sessions[sessionID]; ok {
 		ss.transcodeType = ttype
 		s.sessions[sessionID] = ss
@@ -227,7 +233,7 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 
 	// Enhanced transcode session matching: check if the websocket sessionID
 	// matches any transcode session keys embedded in the session data.
-	// This handles cases where websocket sends short keys like "abc123" but
+	// This handles cases where websocket sends keys like "abc123" or "/transcode/sessions/abc123" but
 	// session data contains transcode session paths like "/transcode/sessions/abc123".
 	for k, ss := range s.sessions {
 		if len(ss.session.Media) > 0 {
@@ -241,6 +247,12 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 							s.sessions[k] = ss
 							return true
 						}
+					}
+					// Also check if the full original path matches part.Key directly
+					if originalSessionID != sessionID && part.Key == originalSessionID {
+						ss.transcodeType = ttype
+						s.sessions[k] = ss
+						return true
 					}
 				}
 			}
