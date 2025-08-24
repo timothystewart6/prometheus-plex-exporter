@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	ttPlex "github.com/timothystewart6/go-plex-client"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
@@ -366,5 +366,114 @@ func TestSessionsCollectWithResolvedLibrary(t *testing.T) {
 	}
 	if !extrapolatedBytesFound {
 		t.Fatalf("expected extrapolated bytes metric not found")
+	}
+}
+
+func TestExtractTranscodeSessionID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "standard transcode session path",
+			input:    "/transcode/sessions/zplafkzqz7buwjittgvojjyl",
+			expected: "zplafkzqz7buwjittgvojjyl",
+		},
+		{
+			name:     "transcode session path with segments",
+			input:    "/transcode/sessions/abc123/segments/0",
+			expected: "abc123",
+		},
+		{
+			name:     "transcode session path without trailing slash",
+			input:    "/transcode/sessions/test-session",
+			expected: "test-session",
+		},
+		{
+			name:     "path without transcode sessions",
+			input:    "/some/other/path",
+			expected: "",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "transcode sessions prefix only",
+			input:    "/transcode/sessions/",
+			expected: "",
+		},
+		{
+			name:     "path without transcode prefix",
+			input:    "no-transcode-in-path",
+			expected: "",
+		},
+		{
+			name:     "complex path with transcode session",
+			input:    "/library/parts/123/transcode/sessions/complex123/file.m3u8",
+			expected: "complex123",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractTranscodeSessionID(tc.input)
+			if result != tc.expected {
+				t.Errorf("extractTranscodeSessionID(%q) = %q, expected %q", tc.input, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestTrySetTranscodeTypeWithTranscodeSessionPath(t *testing.T) {
+	s := &sessions{
+		sessions: map[string]session{},
+		server: &Server{
+			Name: "test-server",
+			ID:   "srv-1",
+		},
+	}
+
+	// Create a session with a transcode session path in the Part.Key field
+	ss := session{}
+	ss.playStarted = time.Now().Add(-5 * time.Second)
+	ss.state = statePlaying
+	ss.resolvedLibraryName = "lib"
+	ss.resolvedLibraryID = "1"
+	ss.resolvedLibraryType = "movie"
+
+	// Simulate session data where Part.Key contains a transcode session path
+	ss.session = ttPlex.Metadata{
+		SessionKey: "different-session-key",
+		Media: []ttPlex.Media{{
+			Bitrate:         1000,
+			VideoResolution: "720p",
+			Part: []ttPlex.Part{{
+				Decision: "transcode",
+				Key:      "/transcode/sessions/zplafkzqz7buwjittgvojjyl/file.m3u8",
+			}},
+		}},
+		Player: ttPlex.Player{Device: "dev", Product: "plex-player"},
+		User:   ttPlex.User{Title: "alice"},
+	}
+
+	// Add session to the map
+	s.sessions["session-1"] = ss
+
+	// Test that TrySetTranscodeType matches the websocket transcode session ID
+	// against the embedded transcode session path
+	websocketSessionID := "zplafkzqz7buwjittgvojjyl"
+	result := s.TrySetTranscodeType(websocketSessionID, "hw")
+
+	if !result {
+		t.Fatalf("TrySetTranscodeType should have found a match for transcode session ID %s", websocketSessionID)
+	}
+
+	// Verify the transcode type was set correctly
+	updatedSession := s.sessions["session-1"]
+	if updatedSession.transcodeType != "hw" {
+		t.Fatalf("expected transcodeType to be 'hw', got %s", updatedSession.transcodeType)
 	}
 }

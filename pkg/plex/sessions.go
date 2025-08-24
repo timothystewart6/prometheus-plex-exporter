@@ -225,6 +225,28 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 		}
 	}
 
+	// Enhanced transcode session matching: check if the websocket sessionID
+	// matches any transcode session keys embedded in the session data.
+	// This handles cases where websocket sends short keys like "abc123" but
+	// session data contains transcode session paths like "/transcode/sessions/abc123".
+	for k, ss := range s.sessions {
+		if len(ss.session.Media) > 0 {
+			for _, media := range ss.session.Media {
+				for _, part := range media.Part {
+					// Check if part.Key contains a transcode session path that matches
+					if strings.Contains(part.Key, "/transcode/sessions/") {
+						// Extract the session ID from the path
+						if pathSessionID := extractTranscodeSessionID(part.Key); pathSessionID == sessionID {
+							ss.transcodeType = ttype
+							s.sessions[k] = ss
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// No existing session matched.
 	// Heuristic fallback: apply to any session that currently has a
 	// part decision of "transcode". This handles cases where the
@@ -242,6 +264,24 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 		}
 	}
 	return applied
+}
+
+// extractTranscodeSessionID extracts the session ID from a transcode session path.
+// For example, "/transcode/sessions/abc123" returns "abc123".
+func extractTranscodeSessionID(path string) string {
+	const transcodePrefix = "/transcode/sessions/"
+	if strings.Contains(path, transcodePrefix) {
+		// Find the position after the prefix
+		if idx := strings.Index(path, transcodePrefix); idx >= 0 {
+			sessionPart := path[idx+len(transcodePrefix):]
+			// Return everything up to the next slash or end of string
+			if slashIdx := strings.Index(sessionPart, "/"); slashIdx >= 0 {
+				return sessionPart[:slashIdx]
+			}
+			return sessionPart
+		}
+	}
+	return ""
 }
 
 func (s *sessions) Update(sessionID string, newState sessionState, newSession *plex.Metadata, media *plex.Metadata) {

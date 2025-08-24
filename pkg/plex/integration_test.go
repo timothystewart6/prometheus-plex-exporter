@@ -458,6 +458,257 @@ func TestIntegration_RealWorldMetrics(t *testing.T) {
 	})
 }
 
+func TestIntegration_TranscodeSessionMatching(t *testing.T) {
+	// Test the enhanced transcode session matching functionality with realistic websocket data
+	server := &Server{
+		ID:      "test-server-id",
+		Name:    "Test Server",
+		Version: "1.32.5.123",
+		libraries: []*Library{
+			{
+				ID:         "1",
+				Name:       "Movies",
+				Type:       "movie",
+				ItemsCount: 50,
+			},
+		},
+	}
+
+	sess := NewSessions(context.Background(), server)
+
+	// Test case 1: Session with transcode session path in Part.Key (the fix we implemented)
+	session1 := ttPlex.Metadata{
+		SessionKey: "session-123",
+		User: ttPlex.User{
+			Title: "TestUser1",
+		},
+		Player: ttPlex.Player{
+			Platform: "OSX",
+			Product:  "Plex Web",
+		},
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 1",
+		Media: []ttPlex.Media{{
+			Bitrate:         8000,
+			VideoResolution: "1080p",
+			Part: []ttPlex.Part{{
+				Decision: "transcode",
+				Key:      "/transcode/sessions/abc123transcodekey/file.m3u8", // This contains the websocket transcode session ID
+			}},
+		}},
+	}
+
+	media1 := ttPlex.Metadata{
+		RatingKey:        "rating-123",
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 1",
+	}
+
+	// Test case 2: Traditional session matching by SessionKey
+	session2 := ttPlex.Metadata{
+		SessionKey: "websocket-session-456",
+		User: ttPlex.User{
+			Title: "TestUser2",
+		},
+		Player: ttPlex.Player{
+			Platform: "Apple TV",
+			Product:  "Plex for Apple TV",
+		},
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 2",
+		Media: []ttPlex.Media{{
+			Bitrate:         12000,
+			VideoResolution: "4k",
+			Part: []ttPlex.Part{{
+				Decision: "directplay",
+				Key:      "/library/parts/456789",
+			}},
+		}},
+	}
+
+	media2 := ttPlex.Metadata{
+		RatingKey:        "rating-456",
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 2",
+	}
+
+	// Add sessions to the manager
+	sess.Update("session-id-1", statePlaying, &session1, &media1)
+	sess.Update("session-id-2", statePlaying, &session2, &media2)
+
+	t.Run("TranscodeSessionPathMatching", func(t *testing.T) {
+		// Test the new enhanced matching: websocket transcode session ID should match
+		// against the transcode session ID embedded in the Part.Key path
+		websocketTranscodeSessionID := "abc123transcodekey"
+		result := sess.TrySetTranscodeType(websocketTranscodeSessionID, "hw")
+
+		if !result {
+			t.Fatalf("TrySetTranscodeType should have found a match for transcode session ID %s", websocketTranscodeSessionID)
+		}
+
+		// Verify the correct session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-id-1"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-1 should exist")
+		}
+
+		if session.transcodeType != "hw" {
+			t.Errorf("Expected transcodeType to be 'hw', got %s", session.transcodeType)
+		}
+
+		// Verify the other session was not affected
+		sess.mtx.Lock()
+		session2Check, exists := sess.sessions["session-id-2"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-2 should exist")
+		}
+
+		if session2Check.transcodeType == "hw" {
+			t.Error("Session session-id-2 should not have been affected by the transcode session matching")
+		}
+	})
+
+	t.Run("TraditionalSessionKeyMatching", func(t *testing.T) {
+		// Test traditional matching by SessionKey still works
+		result := sess.TrySetTranscodeType("websocket-session-456", "both")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for SessionKey websocket-session-456")
+		}
+
+		// Verify the correct session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-id-2"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-2 should exist")
+		}
+
+		if session.transcodeType != "both" {
+			t.Errorf("Expected transcodeType to be 'both', got %s", session.transcodeType)
+		}
+	})
+
+	t.Run("NoMatchScenario", func(t *testing.T) {
+		// Create a clean sessions manager with only directplay sessions to avoid heuristic fallback
+		cleanServer := &Server{
+			ID:      "test-server-clean",
+			Name:    "Clean Test Server",
+			Version: "1.32.5.123",
+		}
+		cleanSess := NewSessions(context.Background(), cleanServer)
+
+		// Add a session with directplay (no transcode decision to trigger heuristic fallback)
+		directplaySession := ttPlex.Metadata{
+			SessionKey: "directplay-session",
+			User: ttPlex.User{
+				Title: "DirectPlayUser",
+			},
+			Player: ttPlex.Player{
+				Platform: "OSX",
+				Product:  "Plex Web",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Directplay Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         4000,
+				VideoResolution: "1080p",
+				Part: []ttPlex.Part{{
+					Decision: "directplay", // This won't trigger heuristic fallback
+					Key:      "/library/parts/directplay123",
+				}},
+			}},
+		}
+
+		directplayMedia := ttPlex.Metadata{
+			RatingKey:        "rating-directplay",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Directplay Movie",
+		}
+
+		cleanSess.Update("directplay-id", statePlaying, &directplaySession, &directplayMedia)
+
+		// Test case where no session matches and no heuristic fallback applies
+		result := cleanSess.TrySetTranscodeType("nonexistent-session-id", "video")
+
+		if result {
+			t.Error("TrySetTranscodeType should not have found a match for nonexistent session ID with directplay-only sessions")
+		}
+	})
+
+	t.Run("MultipleTranscodeSessionPaths", func(t *testing.T) {
+		// Test session with multiple media parts, some with transcode session paths
+		sessionMulti := ttPlex.Metadata{
+			SessionKey: "session-multi",
+			User: ttPlex.User{
+				Title: "TestUserMulti",
+			},
+			Player: ttPlex.Player{
+				Platform: "Roku",
+				Product:  "Plex for Roku",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Multi Part Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         6000,
+				VideoResolution: "720p",
+				Part: []ttPlex.Part{
+					{
+						Decision: "directplay",
+						Key:      "/library/parts/111",
+					},
+					{
+						Decision: "transcode",
+						Key:      "/transcode/sessions/multikey123/segment.m3u8",
+					},
+				},
+			}},
+		}
+
+		mediaMulti := ttPlex.Metadata{
+			RatingKey:        "rating-multi",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Multi Part Movie",
+		}
+
+		sess.Update("session-multi-id", statePlaying, &sessionMulti, &mediaMulti)
+
+		// Test matching against the transcode session in the second part
+		result := sess.TrySetTranscodeType("multikey123", "video")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for multikey123 in multi-part session")
+		}
+
+		// Verify the session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-multi-id"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-multi-id should exist")
+		}
+
+		if session.transcodeType != "video" {
+			t.Errorf("Expected transcodeType to be 'video', got %s", session.transcodeType)
+		}
+	})
+}
+
 func TestTranscodeKind_RealWorldScenarios(t *testing.T) {
 	// Test cases based on actual Prometheus data patterns
 	testCases := []struct {
