@@ -57,5 +57,5 @@ jobs:
         GOARCH: ${{ matrix.goarch }}
     - uses: actions/upload-artifact@v4
       with:
-        name: prometheus-plex-exporter-${{ matrix.goos }}-${{ matrix.goarch}}
+        name: prometheus-plex-exporter-${{ matrix.goos }}-${{ matrix.goarch }}
         path: ./bin

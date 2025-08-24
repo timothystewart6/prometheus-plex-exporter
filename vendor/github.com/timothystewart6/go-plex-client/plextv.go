@@ -64,7 +64,7 @@ func RequestPIN(requestHeaders headers) (PinResponse, error) {
 		return pinInformation, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		return pinInformation, errors.New(resp.Status)
@@ -97,7 +97,7 @@ func CheckPIN(id int, clientIdentifier string) (PinResponse, error) {
 		return PinResponse{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var pinInformation PinResponse
 
@@ -138,7 +138,7 @@ func (p Plex) LinkAccount(code string) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	// type linkAccountResponse struct {
 
@@ -188,7 +188,7 @@ func (p Plex) GetWebhooks() ([]string, error) {
 		return webhooks, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
 		var webhookErr webhookErr
@@ -254,7 +254,7 @@ func (p Plex) SetWebhooks(webhooks []string) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		return errors.New(ErrorFailedToSetWebhook)
@@ -275,7 +275,7 @@ func (p Plex) MyAccount() (UserPlexTV, error) {
 		return account, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		return account, errors.New(ErrorInvalidToken)

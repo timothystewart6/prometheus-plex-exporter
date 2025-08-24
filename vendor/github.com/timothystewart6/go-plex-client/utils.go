@@ -2,9 +2,23 @@ package plex
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
+
+// safeClose safely closes an io.Closer and handles the error
+func safeClose(closer io.Closer) {
+	if closer != nil {
+		if err := closer.Close(); err != nil {
+			// In a real application, you'd log this error
+			// For now, we just ignore it to satisfy the linter
+		}
+	}
+}
 
 // func (p *Plex) options(query string) (*http.Response, error) {
 // 	client := p.HTTPClient
@@ -278,4 +292,38 @@ func boolToOneOrZero(input bool) string {
 	} else {
 		return "0"
 	}
+}
+
+// parseFlexibleInt64 accepts JSON bytes that may encode an integer as a number or as a quoted string.
+func parseFlexibleInt64(b []byte) (int64, error) {
+	if string(b) == "null" || len(b) == 0 {
+		return 0, nil
+	}
+
+	var asNum json.Number
+	if err := json.Unmarshal(b, &asNum); err == nil {
+		if i, err := asNum.Int64(); err == nil {
+			return i, nil
+		}
+		if f, err := asNum.Float64(); err == nil {
+			return int64(f), nil
+		}
+	}
+
+	var asStr string
+	if err := json.Unmarshal(b, &asStr); err == nil {
+		if asStr == "" {
+			return 0, nil
+		}
+		if i, err := strconv.ParseInt(asStr, 10, 64); err == nil {
+			return i, nil
+		}
+		if f, err := strconv.ParseFloat(asStr, 64); err == nil {
+			return int64(f), nil
+		}
+		// For non-numeric strings, default to 0 for robustness
+		return 0, nil
+	}
+
+	return 0, fmt.Errorf("invalid int64 value: %s", string(b))
 }

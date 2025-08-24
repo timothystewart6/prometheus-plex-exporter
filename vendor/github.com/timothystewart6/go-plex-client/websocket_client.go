@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -22,40 +21,6 @@ type TimelineEntry struct {
 	Title         string `json:"title"`
 	Type          int64  `json:"type"`
 	UpdatedAt     int64  `json:"updatedAt"`
-}
-
-// parseFlexibleInt64 accepts JSON bytes that may encode an integer as a number or as a quoted string.
-func parseFlexibleInt64(b []byte) (int64, error) {
-	if string(b) == "null" || len(b) == 0 {
-		return 0, nil
-	}
-
-	var asNum json.Number
-	if err := json.Unmarshal(b, &asNum); err == nil {
-		if i, err := asNum.Int64(); err == nil {
-			return i, nil
-		}
-		if f, err := asNum.Float64(); err == nil {
-			return int64(f), nil
-		}
-	}
-
-	var asStr string
-	if err := json.Unmarshal(b, &asStr); err == nil {
-		if asStr == "" {
-			return 0, nil
-		}
-		if i, err := strconv.ParseInt(asStr, 10, 64); err == nil {
-			return i, nil
-		}
-		if f, err := strconv.ParseFloat(asStr, 64); err == nil {
-			return int64(f), nil
-		}
-		// For non-numeric strings, default to 0 for robustness
-		return 0, nil
-	}
-
-	return 0, fmt.Errorf("invalid int64 value: %s", string(b))
 }
 
 // UnmarshalJSON for TimelineEntry accepts both numeric and string-encoded sectionID values.
@@ -357,7 +322,11 @@ func (p *Plex) SubscribeToNotifications(events *NotificationEvents, interrupt <-
 	done := make(chan struct{})
 
 	go func() {
-		defer c.Close()
+		defer func() {
+			if closeErr := c.Close(); closeErr != nil {
+				// Log the error but don't override the main error
+			}
+		}()
 		defer close(done)
 
 		for {
@@ -417,7 +386,9 @@ func (p *Plex) SubscribeToNotifications(events *NotificationEvents, interrupt <-
 				case <-done:
 				case <-time.After(time.Second):
 					fmt.Println("closing websocket...")
-					c.Close()
+					if closeErr := c.Close(); closeErr != nil {
+						// Log the error but don't override the main error
+					}
 				}
 				return
 			}

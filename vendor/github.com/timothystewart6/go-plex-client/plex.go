@@ -133,7 +133,11 @@ func SignIn(username, password string) (*Plex, error) {
 		return &Plex{}, err
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+		}
+	}()
 
 	if resp.StatusCode != http.StatusCreated {
 		return &Plex{}, errors.New(resp.Status)
@@ -167,12 +171,15 @@ func (p *Plex) Search(title string) (SearchResults, error) {
 		return SearchResults{}, err
 	}
 
-	// Unauthorized
-	if resp.StatusCode == http.StatusUnauthorized {
-		return SearchResults{}, errors.New(ErrorNotAuthorized)
+	if resp.StatusCode != http.StatusOK {
+		return SearchResults{}, fmt.Errorf(ErrorServer, resp.Status)
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+		}
+	}()
 
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		return SearchResults{}, err
@@ -203,7 +210,11 @@ func (p *Plex) GetMetadata(key string) (MediaMetadata, error) {
 		return results, fmt.Errorf(ErrorServer, resp.Status)
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+		}
+	}()
 
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		return results, err
@@ -233,7 +244,11 @@ func (p *Plex) GetMetadataChildren(key string) (MetadataChildren, error) {
 		return MetadataChildren{}, errors.New(ErrorNotAuthorized)
 	}
 
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+		}
+	}()
 
 	var results MetadataChildren
 
@@ -263,7 +278,7 @@ func (p *Plex) GetEpisodes(key string) (SearchResultsEpisode, error) {
 		return SearchResultsEpisode{}, errors.New(ErrorNotAuthorized)
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var results SearchResultsEpisode
 
@@ -293,7 +308,7 @@ func (p *Plex) GetEpisode(key string) (SearchResultsEpisode, error) {
 		return SearchResultsEpisode{}, errors.New(ErrorNotAuthorized)
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var results SearchResultsEpisode
 
@@ -319,7 +334,7 @@ func (p *Plex) GetOnDeck() (SearchResultsEpisode, error) {
 		return SearchResultsEpisode{}, errors.New(ErrorNotAuthorized)
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var results SearchResultsEpisode
 
@@ -382,7 +397,11 @@ func (p *Plex) Download(meta Metadata, path string, createFolders bool, skipIfEx
 			if err != nil {
 				return err
 			}
-			defer out.Close()
+			defer func() {
+				if closeErr := out.Close(); closeErr != nil {
+					// Log the error but don't override the main error
+				}
+			}()
 
 			_, err = io.Copy(out, resp.Body)
 
@@ -413,7 +432,7 @@ func (p *Plex) GetPlaylist(key int) (SearchResultsEpisode, error) {
 		return SearchResultsEpisode{}, fmt.Errorf(ErrorServer, resp.Status)
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var results SearchResultsEpisode
 
@@ -440,7 +459,7 @@ func (p *Plex) Test() (bool, error) {
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return false, errors.New(ErrorNotAuthorized)
@@ -466,7 +485,7 @@ func (p *Plex) KillTranscodeSession(sessionKey string) (bool, error) {
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return false, errors.New(ErrorNotAuthorized)
@@ -489,7 +508,7 @@ func (p *Plex) GetTranscodeSessions() (TranscodeSessionsResponse, error) {
 		return result, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return result, errors.New(ErrorNotAuthorized)
@@ -513,7 +532,7 @@ func (p *Plex) GetPlexTokens(token string) (DevicesResponse, error) {
 		return result, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return result, errors.New(ErrorNotAuthorized)
@@ -536,7 +555,7 @@ func (p *Plex) DeletePlexToken(token string) (bool, error) {
 		return result, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return result, errors.New(ErrorNotAuthorized)
@@ -564,7 +583,7 @@ func (p *Plex) GetFriends() ([]Friends, error) {
 		return []Friends{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return []Friends{}, errors.New(ErrorNotAuthorized)
@@ -587,10 +606,7 @@ func (p *Plex) GetFriends() ([]Friends, error) {
 	friendCount := plexFriendsResp.Size
 
 	plexFriends := make([]Friends, friendCount)
-
-	for ii, f := range plexFriendsResp.User {
-		plexFriends[ii] = f
-	}
+	copy(plexFriends, plexFriendsResp.User)
 
 	return plexFriends, nil
 }
@@ -606,7 +622,7 @@ func (p *Plex) RemoveFriend(id string) (bool, error) {
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
 		return false, errors.New(resp.Status)
@@ -661,7 +677,7 @@ func (p *Plex) InviteFriend(params InviteFriendParams) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		return errors.New(resp.Status)
@@ -719,7 +735,7 @@ func (p *Plex) UpdateFriendAccess(userID string, params UpdateFriendParams) (boo
 		return false, err
 	}
 
-	resp.Body.Close()
+	safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return false, errors.New(resp.Status)
@@ -738,7 +754,7 @@ func (p *Plex) RemoveFriendAccessToLibrary(userID, machineID, serverID string) (
 		return false, err
 	}
 
-	resp.Body.Close()
+	safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return false, errors.New(resp.Status)
@@ -766,7 +782,7 @@ func (p *Plex) GetInvitedFriends() ([]InvitedFriend, error) {
 	}
 
 	var invitedFriendsResp invitedFriendsResponse
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 	err = xml.NewDecoder(resp.Body).Decode(&invitedFriendsResp)
 	if err != nil {
 		return []InvitedFriend{}, err
@@ -798,7 +814,7 @@ func (p *Plex) RemoveInvitedFriend(inviteID string, isFriend, isServer, isHome b
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
 		return false, errors.New(resp.Status)
 	}
@@ -824,7 +840,7 @@ func (p *Plex) CheckUsernameOrEmail(usernameOrEmail string) (bool, error) {
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
 		return false, errors.New(resp.Status)
@@ -855,7 +871,7 @@ func (p *Plex) StopPlayback(machineID string) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf(resp.Status)
+		return fmt.Errorf("request failed: %s", resp.Status)
 	}
 
 	return nil
@@ -871,7 +887,7 @@ func (p *Plex) GetDevices() ([]PMSDevices, error) {
 		return []PMSDevices{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	result := new(resourcesResponse)
 
@@ -925,7 +941,7 @@ func (p *Plex) GetServersInfo() (ServerInfo, error) {
 		return ServerInfo{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return ServerInfo{}, errors.New(resp.Status)
@@ -984,7 +1000,7 @@ func (p *Plex) GetSections(machineID string) ([]ServerSections, error) {
 		return []ServerSections{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var result SectionIDResponse
 
@@ -1017,7 +1033,7 @@ func (p *Plex) GetLibraries() (LibrarySections, error) {
 		return LibrarySections{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return LibrarySections{}, errors.New(resp.Status)
@@ -1056,7 +1072,7 @@ func (p *Plex) GetLibraryContent(sectionKey string, filter string) (SearchResult
 		return SearchResults{}, errors.New("there was an error in the request")
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	var results SearchResults
 
@@ -1121,7 +1137,7 @@ func (p *Plex) CreateLibrary(params CreateLibraryParams) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		return errors.New(resp.Status)
@@ -1140,7 +1156,7 @@ func (p *Plex) DeleteLibrary(key string) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(resp.Status)
@@ -1159,7 +1175,7 @@ func (p *Plex) DeleteMediaByID(id string) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(resp.Status)
@@ -1183,7 +1199,7 @@ func (p *Plex) GetLibraryLabels(sectionKey, sectionIndex string) (LibraryLabels,
 		return LibraryLabels{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return LibraryLabels{}, errors.New(resp.Status)
@@ -1231,7 +1247,7 @@ func (p *Plex) AddLabelToMedia(mediaType, sectionID, id, label, locked string) (
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	return resp.StatusCode == http.StatusOK, nil
 }
@@ -1264,7 +1280,7 @@ func (p *Plex) RemoveLabelFromMedia(mediaType, sectionID, id, label, locked stri
 		return false, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	return resp.StatusCode == http.StatusOK, nil
 }
@@ -1281,7 +1297,7 @@ func (p *Plex) GetSessions() (CurrentSessions, error) {
 		return CurrentSessions{}, err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return CurrentSessions{}, errors.New(resp.Status)
@@ -1316,7 +1332,7 @@ func (p *Plex) TerminateSession(sessionID string, reason string) error {
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s", resp.Status)

@@ -10,7 +10,10 @@ func (p *Plex) SearchPlex(title string) (SearchResults, error) {
 		return SearchResults{}, err
 	}
 
-	results.MediaContainer.Metadata = results.MediaContainer.Metadata[:4]
+	// Only limit to 4 results if there are more than 4
+	if len(results.MediaContainer.Metadata) > 4 {
+		results.MediaContainer.Metadata = results.MediaContainer.Metadata[:4]
+	}
 
 	return results, nil
 }
