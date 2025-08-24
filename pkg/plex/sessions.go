@@ -51,16 +51,20 @@ type session struct {
 }
 
 type sessions struct {
-	mtx                            sync.Mutex
-	sessions                       map[string]session
+	mtx      sync.Mutex
+	sessions map[string]session
+	// sessionTranscodeMap maps sessionKey to current transcodeSession ID
+	// This is populated from PlaySessionStateNotification.transcodeSession
+	sessionTranscodeMap            map[string]string
 	server                         *Server
 	totalEstimatedTransmittedKBits float64
 }
 
 func NewSessions(ctx context.Context, server *Server) *sessions {
 	s := &sessions{
-		sessions: map[string]session{},
-		server:   server,
+		sessions:            map[string]session{},
+		sessionTranscodeMap: map[string]string{},
+		server:              server,
 	}
 
 	ticker := time.NewTicker(time.Minute)
@@ -86,7 +90,22 @@ func (s *sessions) pruneOldSessions() {
 	for k, v := range s.sessions {
 		if v.state == stateStopped && time.Since(v.lastUpdate) > sessionTimeout {
 			delete(s.sessions, k)
+			delete(s.sessionTranscodeMap, k)
 		}
+	}
+}
+
+// SetSessionTranscodeMapping establishes the mapping between a sessionKey and its transcodeSession ID.
+// This is called when PlaySessionStateNotification events are received.
+func (s *sessions) SetSessionTranscodeMapping(sessionKey, transcodeSessionID string) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if transcodeSessionID != "" {
+		s.sessionTranscodeMap[sessionKey] = transcodeSessionID
+	} else {
+		// If transcodeSessionID is empty, remove the mapping (direct play)
+		delete(s.sessionTranscodeMap, sessionKey)
 	}
 }
 
@@ -170,6 +189,12 @@ func (s *sessions) TrySetSubtitleAction(sessionID, action string) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
+	// If sessionID is a full transcode session path, extract just the session ID part
+	originalSessionID := sessionID
+	if strings.HasPrefix(sessionID, "/transcode/sessions/") {
+		sessionID = extractTranscodeSessionID(sessionID)
+	}
+
 	if ss, ok := s.sessions[sessionID]; ok {
 		ss.subtitleAction = action
 		s.sessions[sessionID] = ss
@@ -181,6 +206,18 @@ func (s *sessions) TrySetSubtitleAction(sessionID, action string) bool {
 			ss.subtitleAction = action
 			s.sessions[k] = ss
 			return true
+		}
+	}
+
+	// Check if any session has this transcode session ID mapped via PlaySessionStateNotification
+	for sessionKey, mappedTranscodeID := range s.sessionTranscodeMap {
+		extractedID := extractTranscodeSessionID(originalSessionID)
+		if mappedTranscodeID == sessionID || mappedTranscodeID == originalSessionID || mappedTranscodeID == extractedID {
+			if ss, ok := s.sessions[sessionKey]; ok {
+				ss.subtitleAction = action
+				s.sessions[sessionKey] = ss
+				return true
+			}
 		}
 	}
 
@@ -256,6 +293,18 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 			if strings.Contains(sessionID, ss.session.SessionKey) || strings.Contains(ss.session.SessionKey, sessionID) {
 				ss.transcodeType = ttype
 				s.sessions[k] = ss
+				return true
+			}
+		}
+	}
+
+	// Check if any session has this transcode session ID mapped via PlaySessionStateNotification
+	for sessionKey, mappedTranscodeID := range s.sessionTranscodeMap {
+		extractedID := extractTranscodeSessionID(originalSessionID)
+		if mappedTranscodeID == sessionID || mappedTranscodeID == originalSessionID || mappedTranscodeID == extractedID {
+			if ss, ok := s.sessions[sessionKey]; ok {
+				ss.transcodeType = ttype
+				s.sessions[sessionKey] = ss
 				return true
 			}
 		}
@@ -418,7 +467,12 @@ func (s *sessions) extrapolatedTransmittedBytes() float64 {
 
 	for _, ss := range s.sessions {
 		if ss.state == statePlaying {
-			total += time.Since(ss.playStarted).Seconds() * float64(ss.session.Media[0].Bitrate)
+			// Be defensive: session.Media may be empty in some edge cases
+			// (for example, when a websocket event arrived before metadata was
+			// fully populated). Only use the bitrate when available.
+			if len(ss.session.Media) > 0 {
+				total += time.Since(ss.playStarted).Seconds() * float64(ss.session.Media[0].Bitrate)
+			}
 		}
 	}
 
@@ -440,7 +494,6 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 		if session.playStarted.IsZero() {
 			continue
 		}
-
 		title, season, episode := labels(session.media)
 
 		// Prefer persisted resolved labels if available; fall back to
@@ -463,6 +516,38 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 
+		// Defensive extraction of nested fields that may be missing when
+		// websocket notifications arrive before full metadata is available.
+		streamType := "unknown"
+		sessionRes := ""
+		fileRes := ""
+		bitrate := "0"
+		device := ""
+		product := ""
+		user := ""
+
+		if len(session.session.Media) > 0 {
+			if len(session.session.Media[0].Part) > 0 {
+				if session.session.Media[0].Part[0].Decision != "" {
+					streamType = session.session.Media[0].Part[0].Decision
+				}
+			}
+			if session.session.Media[0].VideoResolution != "" {
+				sessionRes = session.session.Media[0].VideoResolution
+			}
+			if session.session.Media[0].Bitrate != 0 {
+				bitrate = strconv.Itoa(session.session.Media[0].Bitrate)
+			}
+			device = session.session.Player.Device
+			product = session.session.Player.Product
+			user = session.session.User.Title
+		}
+		if len(session.media.Media) > 0 {
+			if session.media.Media[0].VideoResolution != "" {
+				fileRes = session.media.Media[0].VideoResolution
+			}
+		}
+
 		ch <- metrics.Play(
 			1.0,
 			"plex",
@@ -475,13 +560,13 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			title,
 			season,
 			episode,
-			session.session.Media[0].Part[0].Decision,      // stream type
-			session.session.Media[0].VideoResolution,       // stream res
-			session.media.Media[0].VideoResolution,         // file res
-			strconv.Itoa(session.session.Media[0].Bitrate), // bitrate
-			session.session.Player.Device,                  // device
-			session.session.Player.Product,                 // device type
-			session.session.User.Title,
+			streamType, // stream type
+			sessionRes, // stream res
+			fileRes,    // file res
+			bitrate,    // bitrate
+			device,     // device
+			product,    // device type
+			user,
 			id,
 			session.transcodeType,
 			session.subtitleAction,
@@ -504,13 +589,13 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 			title,
 			season,
 			episode,
-			session.session.Media[0].Part[0].Decision,      // stream type
-			session.session.Media[0].VideoResolution,       // stream res
-			session.media.Media[0].VideoResolution,         // file res
-			strconv.Itoa(session.session.Media[0].Bitrate), // bitrate
-			session.session.Player.Device,                  // device
-			session.session.Player.Product,                 // device type
-			session.session.User.Title,
+			streamType, // stream type
+			sessionRes, // stream res
+			fileRes,    // file res
+			bitrate,    // bitrate
+			device,     // device
+			product,    // device type
+			user,
 			id,
 			session.transcodeType,
 			session.subtitleAction,

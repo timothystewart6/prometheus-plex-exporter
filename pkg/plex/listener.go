@@ -459,6 +459,11 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 			)
 		}
 
+		// Update the session-transcode mapping from the notification
+		if l.activeSessions != nil {
+			l.activeSessions.SetSessionTranscodeMapping(n.SessionKey, n.TranscodeSession)
+		}
+
 		l.activeSessions.Update(n.SessionKey, sessionState(n.State), session, &metadata.MediaContainer.Metadata[0])
 	}
 
