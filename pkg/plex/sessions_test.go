@@ -6,6 +6,7 @@ package plex
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -670,6 +671,1457 @@ func TestTrySetTranscodeTypeEnhancedHeuristics(t *testing.T) {
 		// Verify the older session was not updated
 		if s.sessions["older-session"].transcodeType == "video" {
 			t.Error("older-session should not have been updated")
+		}
+	})
+}
+
+func readMetric(m prometheus.Metric) (float64, map[string]string, error) {
+	var pm dto.Metric
+	if err := m.Write(&pm); err != nil {
+		return 0, nil, err
+	}
+	var v float64
+	if pm.GetCounter() != nil {
+		v = pm.GetCounter().GetValue()
+	} else if pm.GetGauge() != nil {
+		v = pm.GetGauge().GetValue()
+	}
+	labels := map[string]string{}
+	for _, lp := range pm.Label {
+		labels[lp.GetName()] = lp.GetValue()
+	}
+	return v, labels, nil
+}
+
+func TestSessionsCollectEmitsPlayAndPlayDuration(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{Name: "srvname", ID: "srvID"}
+	s := NewSessions(ctx, srv)
+
+	// Build session and media metadata
+	mdSession := ttPlex.Metadata{
+		SessionKey: "sess-1",
+		Media: []ttPlex.Media{{
+			Part:            []ttPlex.Part{{Decision: "DirectPlay"}},
+			VideoResolution: "1080",
+			Bitrate:         8000,
+		}},
+		Player: ttPlex.Player{Device: "DeviceX", Product: "DeviceType"},
+		User:   ttPlex.User{Title: "alice"},
+	}
+	mdMedia := ttPlex.Metadata{
+		Type:             "movie",
+		Title:            "MyMovie",
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Media:            []ttPlex.Media{{VideoResolution: "1080"}},
+	}
+
+	// Insert session with a non-zero playStarted so Collect will emit metrics
+	s.mtx.Lock()
+	s.sessions["sess-1"] = session{
+		session:             mdSession,
+		media:               mdMedia,
+		state:               statePlaying,
+		playStarted:         time.Now().Add(-5 * time.Second),
+		prevPlayedTime:      2 * time.Second,
+		resolvedLibraryName: "MyLib",
+		resolvedLibraryID:   "1",
+		resolvedLibraryType: "movie",
+		transcodeType:       "none",
+		subtitleAction:      "none",
+	}
+	s.mtx.Unlock()
+
+	ch := make(chan prometheus.Metric, 10)
+	s.Collect(ch)
+	close(ch)
+
+	foundPlay := false
+	foundPlayDuration := false
+	for m := range ch {
+		v, labels, err := readMetric(m)
+		if err != nil {
+			t.Fatalf("failed to read metric: %v", err)
+		}
+		if labels["title"] == "MyMovie" {
+			// There should be a Play (counter) and a PlayDuration (counter) metric
+			if labels["user"] != "alice" {
+				t.Fatalf("expected user label alice, got %q", labels["user"])
+			}
+			// Value should be >= 0
+			if v < 0 {
+				t.Fatalf("unexpected negative metric value: %v", v)
+			}
+			// Determine whether this metric is play count or play duration by checking label presence
+			if _, ok := labels["session"]; ok {
+				// Both metrics include 'session' label; distinguish by value: Play should be 1.0, PlayDuration > 0
+				if v == 1.0 {
+					foundPlay = true
+				} else if v > 0 {
+					foundPlayDuration = true
+				}
+			}
+		}
+	}
+	if !foundPlay {
+		t.Fatalf("expected Play metric for session not found")
+	}
+	if !foundPlayDuration {
+		t.Fatalf("expected PlayDuration metric for session not found")
+	}
+}
+
+// mockPlexData represents realistic data from Prometheus metrics
+type mockPlexData struct {
+	server   mockServerInfo
+	sessions []mockSession
+}
+
+type mockServerInfo struct {
+	friendlyName      string
+	machineIdentifier string
+	version           string
+}
+
+type mockSession struct {
+	sessionID string
+	session   ttPlex.Metadata
+	media     ttPlex.Metadata
+}
+
+// createMockPlexData generates test data based on real Prometheus metrics
+func createMockPlexData() mockPlexData {
+	return mockPlexData{
+		server: mockServerInfo{
+			friendlyName: "Plex Server",
+			// sanitized mock machine identifier
+			machineIdentifier: "mock-machine-id",
+			version:           "1.32.5.123",
+		},
+		sessions: []mockSession{
+			{
+				sessionID: "328",
+				session: ttPlex.Metadata{
+					SessionKey: "328",
+					User: ttPlex.User{
+						Title: "User1",
+					},
+					Player: ttPlex.Player{
+						Platform: "OSX",
+						Product:  "Plex Web",
+						Title:    "OSX",
+						Device:   "OSX",
+					},
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Wizard of Oz",
+					ViewOffset:       370575, // milliseconds
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         20256,
+							VideoResolution: "4k",
+							Container:       "mkv",
+							Part: []ttPlex.Part{
+								{
+									Decision: "transcode",
+								},
+							},
+						},
+					},
+				},
+				media: ttPlex.Metadata{
+					RatingKey:        "test001",
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Wizard of Oz",
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         20256,
+							VideoResolution: "4k",
+							Container:       "mkv",
+						},
+					},
+				},
+			},
+			{
+				sessionID: "329",
+				session: ttPlex.Metadata{
+					SessionKey: "329",
+					User: ttPlex.User{
+						Title: "User2",
+					},
+					Player: ttPlex.Player{
+						Platform: "VizioTV",
+						Product:  "Plex for Vizio",
+						Title:    "Vizio SmartCast",
+						Device:   "Vizio SmartCast",
+					},
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Back to the Future",
+					ViewOffset:       9265062, // milliseconds
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         7351,
+							VideoResolution: "4k",
+							Container:       "mp4",
+							Part: []ttPlex.Part{
+								{
+									Decision: "directplay",
+								},
+							},
+						},
+					},
+				},
+				media: ttPlex.Metadata{
+					RatingKey:        "test002",
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Back to the Future",
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         7351,
+							VideoResolution: "4k",
+							Container:       "mp4",
+						},
+					},
+				},
+			},
+			{
+				sessionID: "330",
+				session: ttPlex.Metadata{
+					SessionKey: "330",
+					User: ttPlex.User{
+						Title: "User3",
+					},
+					Player: ttPlex.Player{
+						Platform: "OSX",
+						Product:  "Plex Web",
+						Title:    "OSX",
+						Device:   "OSX",
+					},
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "The Goonies",
+					ViewOffset:       4576965, // milliseconds
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         20256,
+							VideoResolution: "4k",
+							Container:       "mkv",
+							Part: []ttPlex.Part{
+								{
+									Decision: "transcode",
+								},
+							},
+						},
+					},
+				},
+				media: ttPlex.Metadata{
+					RatingKey:        "test003",
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "The Goonies",
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         20256,
+							VideoResolution: "4k",
+							Container:       "mkv",
+						},
+					},
+				},
+			},
+			{
+				sessionID: "335",
+				session: ttPlex.Metadata{
+					SessionKey: "335",
+					User: ttPlex.User{
+						Title: "User4",
+					},
+					Player: ttPlex.Player{
+						Platform: "RokuTV001",
+						Product:  "Plex for Roku",
+						Title:    "RokuTV001",
+						Device:   "RokuTV001",
+					},
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "The Karate Kid",
+					ViewOffset:       2949055, // milliseconds
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         6251,
+							VideoResolution: "4k",
+							Container:       "mp4",
+							Part: []ttPlex.Part{
+								{
+									Decision: "transcode",
+								},
+							},
+						},
+					},
+				},
+				media: ttPlex.Metadata{
+					RatingKey:        "test004",
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "The Karate Kid",
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         6251,
+							VideoResolution: "4k",
+							Container:       "mp4",
+						},
+					},
+				},
+			},
+			{
+				sessionID: "336",
+				session: ttPlex.Metadata{
+					SessionKey: "336",
+					User: ttPlex.User{
+						Title: "User5",
+					},
+					Player: ttPlex.Player{
+						Platform: "Apple TV",
+						Product:  "Plex for Apple TV",
+						Title:    "Apple TV",
+						Device:   "Apple TV",
+					},
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Batman Begins",
+					ViewOffset:       3227773, // milliseconds
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         11178,
+							VideoResolution: "4k",
+							Container:       "mkv",
+							Part: []ttPlex.Part{
+								{
+									Decision: "transcode",
+								},
+							},
+						},
+					},
+				},
+				media: ttPlex.Metadata{
+					RatingKey:        "test005",
+					LibrarySectionID: ttPlex.FlexibleInt64(1),
+					Type:             "movie",
+					Title:            "Batman Begins",
+					Media: []ttPlex.Media{
+						{
+							Bitrate:         11178,
+							VideoResolution: "4k",
+							Container:       "mkv",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestIntegration_RealWorldMetrics(t *testing.T) {
+	// Create mock data based on real Prometheus metrics
+	mockData := createMockPlexData()
+
+	// Create mock server with libraries
+	server := &Server{
+		ID:      mockData.server.machineIdentifier,
+		Name:    mockData.server.friendlyName,
+		Version: mockData.server.version,
+		libraries: []*Library{
+			{
+				ID:         "1",
+				Name:       "Movies",
+				Type:       "movie",
+				ItemsCount: 150,
+			},
+		},
+	}
+
+	// Create sessions manager
+	sess := NewSessions(context.Background(), server)
+
+	// Simulate active sessions like in Prometheus data
+	for _, mockSession := range mockData.sessions {
+		sess.Update(
+			mockSession.sessionID,
+			statePlaying, // Use the correct state constant
+			&mockSession.session,
+			&mockSession.media,
+		)
+
+		// Set realistic transcode and subtitle info based on data
+		switch mockSession.sessionID {
+		case "328", "330", "335", "336": // These were transcoding in data
+			sess.SetTranscodeType(mockSession.sessionID, "both")
+		case "329": // Back to the Future was direct play
+			sess.SetTranscodeType(mockSession.sessionID, "none")
+		default:
+			sess.SetTranscodeType(mockSession.sessionID, "unknown")
+		}
+	}
+
+	// Test metrics collection
+	t.Run("CollectPlayMetrics", func(t *testing.T) {
+		// Create channels for describe and collect
+		descCh := make(chan *prometheus.Desc, 100)
+		metricCh := make(chan prometheus.Metric, 100)
+
+		// Describe and collect metrics
+		sess.Describe(descCh)
+		close(descCh)
+
+		sess.Collect(metricCh)
+		close(metricCh)
+
+		// Count metrics and debug output
+		playMetrics := 0
+		durationMetrics := 0
+		totalMetrics := 0
+		expectedUsers := map[string]bool{
+			"User1": false, "User2": false, "User3": false,
+			"User4": false, "User5": false,
+		}
+
+		for metric := range metricCh {
+			totalMetrics++
+			dto := &dto.Metric{}
+			err := metric.Write(dto)
+			if err != nil {
+				t.Fatalf("Failed to write metric: %v", err)
+			}
+
+			desc := metric.Desc().String()
+
+			if strings.Contains(desc, "plays_total") {
+				playMetrics++
+				// Check for expected users in labels
+				for _, label := range dto.Label {
+					if *label.Name == "user" {
+						if _, exists := expectedUsers[*label.Value]; exists {
+							expectedUsers[*label.Value] = true
+						}
+					}
+				}
+			} else if strings.Contains(desc, "play_seconds_total") {
+				durationMetrics++
+			}
+		}
+
+		t.Logf("Integration test completed: %d total metrics, %d play metrics, %d duration metrics", totalMetrics, playMetrics, durationMetrics)
+
+		// Verify we have metrics
+		if playMetrics == 0 {
+			t.Error("Expected to find plays_total metrics")
+		}
+		if durationMetrics == 0 {
+			t.Error("Expected to find play_seconds_total metrics")
+		}
+
+		// Verify all expected users were found
+		for user, found := range expectedUsers {
+			if !found {
+				t.Errorf("Expected user %s not found in metrics", user)
+			}
+		}
+	})
+
+	t.Run("DeviceTypeVariety", func(t *testing.T) {
+		// Test that we have the variety of devices from real data
+		expectedDevices := []string{"OSX", "VizioTV", "RokuTV001", "Apple TV"}
+		expectedProducts := []string{"Plex Web", "Plex for Vizio", "Plex for Roku", "Plex for Apple TV"}
+
+		sess.mtx.Lock()
+		devices := make(map[string]bool)
+		products := make(map[string]bool)
+
+		for _, session := range sess.sessions {
+			devices[session.session.Player.Platform] = true
+			products[session.session.Player.Product] = true
+		}
+		sess.mtx.Unlock()
+
+		for _, device := range expectedDevices {
+			if !devices[device] {
+				t.Errorf("Expected device %s not found in sessions", device)
+			}
+		}
+
+		for _, product := range expectedProducts {
+			if !products[product] {
+				t.Errorf("Expected product %s not found in sessions", product)
+			}
+		}
+	})
+
+	t.Run("TranscodeScenarios", func(t *testing.T) {
+		// Test different transcode scenarios from data
+		testCases := []struct {
+			sessionID         string
+			expectedTranscode string
+		}{
+			{"328", "both"}, // Wizard of Oz - OSX Web transcoding both
+			{"329", "none"}, // Back to the Future - Vizio direct play
+			{"330", "both"}, // The Goonies - OSX Web transcoding
+			{"335", "both"}, // The Karate Kid - Roku transcoding
+			{"336", "both"}, // Batman Begins - Apple TV transcoding
+		}
+
+		sess.mtx.Lock()
+		for _, tc := range testCases {
+			session, exists := sess.sessions[tc.sessionID]
+			if !exists {
+				t.Errorf("Session %s not found", tc.sessionID)
+				continue
+			}
+
+			if session.transcodeType != tc.expectedTranscode {
+				t.Errorf("Session %s: expected transcode %s, got %s", tc.sessionID, tc.expectedTranscode, session.transcodeType)
+			}
+		}
+		sess.mtx.Unlock()
+	})
+
+	t.Run("UserDistribution", func(t *testing.T) {
+		// Verify we have the expected users from real data
+		expectedUsers := []string{"User1", "User2", "User3", "User4", "User5"}
+
+		sess.mtx.Lock()
+		users := make(map[string]bool)
+		for _, session := range sess.sessions {
+			users[session.session.User.Title] = true
+		}
+		sess.mtx.Unlock()
+
+		for _, user := range expectedUsers {
+			if !users[user] {
+				t.Errorf("Expected user %s not found in sessions", user)
+			}
+		}
+
+		if len(users) != len(expectedUsers) {
+			t.Errorf("Expected %d users, got %d", len(expectedUsers), len(users))
+		}
+	})
+}
+
+// helper to extract a metric value and label by name
+func metricValueAndLabel(m prometheus.Metric, label string) (float64, string, error) {
+	var pm dto.Metric
+	if err := m.Write(&pm); err != nil {
+		return 0, "", err
+	}
+	var v float64
+	if pm.GetCounter() != nil {
+		v = pm.GetCounter().GetValue()
+	} else if pm.GetGauge() != nil {
+		v = pm.GetGauge().GetValue()
+	}
+	for _, lp := range pm.Label {
+		if lp.GetName() == label {
+			return v, lp.GetValue(), nil
+		}
+	}
+	return v, "", nil
+}
+
+func TestSessionsDescribeAndCollect(t *testing.T) {
+	srv := &Server{Name: "srvname", ID: "srvID"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewSessions(ctx, srv)
+	// Describe
+	dch := make(chan *prometheus.Desc, 3)
+	s.Describe(dch)
+	close(dch)
+	descs := 0
+	for range dch {
+		descs++
+	}
+	if descs != 3 {
+		t.Fatalf("expected 3 descriptors, got %d", descs)
+	}
+
+	// Collect should emit at least the estimated transmitted bytes metric
+	mch := make(chan prometheus.Metric, 10)
+	s.Collect(mch)
+	close(mch)
+	found := false
+	for m := range mch {
+		v, lbl, err := metricValueAndLabel(m, "server")
+		if err != nil {
+			t.Fatalf("failed to read metric: %v", err)
+		}
+		if lbl == "srvname" || lbl == "srvID" {
+			// this is just to reference the labels; continue
+		}
+		// look for the estimated bytes metric by trying to read value (should be zero)
+		if v == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected to find estimated transmitted bytes metric with zero value")
+	}
+}
+
+func TestSetAndTrySetTranscodeType_MatchingVariants(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Exact map key
+	m1 := ttPlex.Metadata{SessionKey: "sess-1"}
+	s.mtx.Lock()
+	s.sessions["key1"] = session{session: m1}
+	s.mtx.Unlock()
+
+	s.SetTranscodeType("key1", "video")
+	s.mtx.Lock()
+	if s.sessions["key1"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for key1, got %q", s.sessions["key1"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// Inner Metadata.SessionKey match
+	s.SetTranscodeType("sess-1", "audio")
+	s.mtx.Lock()
+	if s.sessions["key1"].transcodeType != "audio" {
+		t.Fatalf("expected transcodeType=audio for key1 after inner-key set, got %q", s.sessions["key1"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// Substring match: store under a different map key with SessionKey set
+	m2 := ttPlex.Metadata{SessionKey: "abc"}
+	s.mtx.Lock()
+	s.sessions["k-abc"] = session{session: m2}
+	s.mtx.Unlock()
+
+	s.SetTranscodeType("prefix-abc-suffix", "both")
+	s.mtx.Lock()
+	if s.sessions["k-abc"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for k-abc via substring match, got %q", s.sessions["k-abc"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+func TestTrySetTranscodeType_HeuristicFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create a session that has Media.Part[0].Decision == "transcode"
+	media := ttPlex.Media{Part: []ttPlex.Part{{Decision: "transcode"}}}
+	md := ttPlex.Metadata{Media: []ttPlex.Media{media}}
+
+	s.mtx.Lock()
+	s.sessions["other"] = session{session: md}
+	s.mtx.Unlock()
+
+	applied := s.TrySetTranscodeType("nonmatching", "video")
+	if !applied {
+		t.Fatalf("expected heuristic fallback to apply transcode type")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["other"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video applied by heuristic, got %q", s.sessions["other"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+func TestSetAndTrySetSubtitleAction_MatchingVariants(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Exact map key
+	m1 := ttPlex.Metadata{SessionKey: "sess-sub"}
+	s.mtx.Lock()
+	s.sessions["subkey"] = session{session: m1}
+	s.mtx.Unlock()
+
+	s.SetSubtitleAction("subkey", "copy")
+	s.mtx.Lock()
+	if s.sessions["subkey"].subtitleAction != "copy" {
+		t.Fatalf("expected subtitleAction=copy for subkey, got %q", s.sessions["subkey"].subtitleAction)
+	}
+	s.mtx.Unlock()
+
+	// Inner key match
+	ok := s.TrySetSubtitleAction("sess-sub", "burn")
+	if !ok {
+		t.Fatalf("expected TrySetSubtitleAction to return true for inner-key match")
+	}
+	s.mtx.Lock()
+	if s.sessions["subkey"].subtitleAction != "burn" {
+		t.Fatalf("expected subtitleAction=burn for subkey after inner-key TrySet, got %q", s.sessions["subkey"].subtitleAction)
+	}
+	s.mtx.Unlock()
+
+	// Substring match
+	m2 := ttPlex.Metadata{SessionKey: "def"}
+	s.mtx.Lock()
+	s.sessions["x-def-y"] = session{session: m2}
+	s.mtx.Unlock()
+
+	ok2 := s.TrySetSubtitleAction("prefix-def", "copy")
+	if !ok2 {
+		t.Fatalf("expected TrySetSubtitleAction to return true for substring match")
+	}
+	s.mtx.Lock()
+	if s.sessions["x-def-y"].subtitleAction != "copy" {
+		t.Fatalf("expected subtitleAction=copy for x-def-y after substring TrySet, got %q", s.sessions["x-def-y"].subtitleAction)
+	}
+	s.mtx.Unlock()
+
+	// Ensure prune goroutine is running and doesn't race
+	time.Sleep(10 * time.Millisecond)
+}
+
+func TestSetSubtitleAction_InnerSubstringAndFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Inner-key match
+	inner := ttPlex.Metadata{SessionKey: "inner-1"}
+	s.mtx.Lock()
+	s.sessions["kinner"] = session{session: inner}
+	s.mtx.Unlock()
+
+	s.SetSubtitleAction("inner-1", "copy")
+	s.mtx.Lock()
+	if s.sessions["kinner"].subtitleAction != "copy" {
+		t.Fatalf("expected subtitleAction=copy for kinner after inner-key Set, got %q", s.sessions["kinner"].subtitleAction)
+	}
+	s.mtx.Unlock()
+
+	// Substring match
+	sub := ttPlex.Metadata{SessionKey: "subid"}
+	s.mtx.Lock()
+	s.sessions["pre-subid-post"] = session{session: sub}
+	s.mtx.Unlock()
+
+	s.SetSubtitleAction("prefix-subid", "burn")
+	s.mtx.Lock()
+	if s.sessions["pre-subid-post"].subtitleAction != "burn" {
+		t.Fatalf("expected subtitleAction=burn for pre-subid-post after substring Set, got %q", s.sessions["pre-subid-post"].subtitleAction)
+	}
+	s.mtx.Unlock()
+
+	// Fallback: create new entry under provided key
+	s.SetSubtitleAction("new-session-key", "copy")
+	s.mtx.Lock()
+	if s.sessions["new-session-key"].subtitleAction != "copy" {
+		t.Fatalf("expected subtitleAction=copy for newly created session entry, got %q", s.sessions["new-session-key"].subtitleAction)
+	}
+	s.mtx.Unlock()
+}
+
+// Reproduce reported real-world keys: ensure transcode session paths map to
+// the numeric session map keys and that media.Part keys containing
+// "/transcode/sessions/<id>" are preferred when matching.
+func TestTrySetTranscodeType_TranscodePathMatchesNumericSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Example numeric map keys representing session IDs observed in logs
+	// mapKey=350 and mapKey=351 with inner SessionKey equal to the same numeric id
+	m350 := ttPlex.Metadata{SessionKey: "350", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d"}}}}}
+	m351 := ttPlex.Metadata{SessionKey: "351", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg"}}}}}
+
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350}
+	s.sessions["351"] = session{session: m351}
+	s.mtx.Unlock()
+
+	// Incoming transcode update uses the full transcode path from websocket
+	applied1 := s.TrySetTranscodeType("/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d", "both")
+	if !applied1 {
+		t.Fatalf("expected TrySetTranscodeType to match transcode path to session 350")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for session 350, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// Another transcode update should match session 351 via its part key
+	applied2 := s.TrySetTranscodeType("/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg", "video")
+	if !applied2 {
+		t.Fatalf("expected TrySetTranscodeType to match transcode path to session 351")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["351"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for session 351, got %q", s.sessions["351"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+// Ensure TrySetTranscodeType matches when incoming keys are either the
+// raw key (e.g. "0yqi...") or the full path ("/transcode/sessions/0yqi...").
+func TestTrySetTranscodeType_MixedKeyForms(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// session 350 has a media part that references a transcode session path
+	m350 := ttPlex.Metadata{SessionKey: "350", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg"}}}}}
+	// session 351 references a different transcode path
+	m351 := ttPlex.Metadata{SessionKey: "351", Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53"}}}}}
+
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350}
+	s.sessions["351"] = session{session: m351}
+	s.mtx.Unlock()
+
+	// incoming raw key (no leading path) should match session 350
+	if !s.TrySetTranscodeType("0yqiuxt8q0ahpntewa4ee6bg", "both") {
+		t.Fatalf("expected raw transcode key to match session 350")
+	}
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for 350, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	// incoming full path should match session 351
+	if !s.TrySetTranscodeType("/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53", "video") {
+		t.Fatalf("expected full transcode path to match session 351")
+	}
+	s.mtx.Lock()
+	if s.sessions["351"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for 351, got %q", s.sessions["351"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+// TestSessionTranscodeMappingBasic tests the basic functionality of session transcode mapping
+func TestSessionTranscodeMappingBasic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create sessions like we would from Plex API
+	m350 := ttPlex.Metadata{SessionKey: "350", User: ttPlex.User{Title: "user1"}, Player: ttPlex.Player{Product: "Plex Web"}}
+	m352 := ttPlex.Metadata{SessionKey: "352", User: ttPlex.User{Title: "user2"}, Player: ttPlex.Player{Product: "Plex for TV"}}
+
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350, state: statePlaying}
+	s.sessions["352"] = session{session: m352, state: statePlaying}
+	s.mtx.Unlock()
+
+	// Establish session transcode mappings (as would happen from PlaySessionStateNotification)
+	s.SetSessionTranscodeMapping("350", "abc123-session-id")
+	s.SetSessionTranscodeMapping("352", "xyz789-session-id")
+
+	// Test TrySetTranscodeType with full transcode paths
+	if !s.TrySetTranscodeType("/transcode/sessions/abc123-session-id", "video") {
+		t.Fatal("TrySetTranscodeType should match session 350 via transcode mapping")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "video" {
+		t.Fatalf("expected transcodeType=video for session 350, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+
+	if !s.TrySetTranscodeType("/transcode/sessions/xyz789-session-id", "both") {
+		t.Fatal("TrySetTranscodeType should match session 352 via transcode mapping")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["352"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both for session 352, got %q", s.sessions["352"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+// TestSessionTranscodeMappingSubtitleAction tests that TrySetSubtitleAction also uses the mapping
+func TestSessionTranscodeMappingSubtitleAction(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create session
+	m350 := ttPlex.Metadata{SessionKey: "350", User: ttPlex.User{Title: "user1"}, Player: ttPlex.Player{Product: "Plex Web"}}
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350, state: statePlaying}
+	s.mtx.Unlock()
+
+	// Establish mapping
+	s.SetSessionTranscodeMapping("350", "subtitle-test-session")
+
+	// Test TrySetSubtitleAction
+	if !s.TrySetSubtitleAction("/transcode/sessions/subtitle-test-session", "burn") {
+		t.Fatal("TrySetSubtitleAction should match session 350 via transcode mapping")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["350"].subtitleAction != "burn" {
+		t.Fatalf("expected subtitleAction=burn for session 350, got %q", s.sessions["350"].subtitleAction)
+	}
+	s.mtx.Unlock()
+}
+
+// TestSessionTranscodeMappingEmpty tests behavior with empty/nil mappings
+func TestSessionTranscodeMappingEmpty(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create session
+	m350 := ttPlex.Metadata{SessionKey: "350"}
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350, state: statePlaying}
+	s.mtx.Unlock()
+
+	// No mapping established - should fall back to existing matching logic
+	// This should fail since there's no transcode key in the session
+	if s.TrySetTranscodeType("/transcode/sessions/nonexistent", "video") {
+		t.Fatal("TrySetTranscodeType should fail when no mapping exists and no fallback matches")
+	}
+
+	// Set empty mapping (simulates direct play)
+	s.SetSessionTranscodeMapping("350", "")
+
+	// Should still fail since empty mapping was removed
+	if s.TrySetTranscodeType("/transcode/sessions/something", "video") {
+		t.Fatal("TrySetTranscodeType should fail after empty mapping is set")
+	}
+}
+
+// TestSessionTranscodeMappingMultipleSessions tests behavior with multiple mapped sessions
+func TestSessionTranscodeMappingMultipleSessions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create multiple sessions
+	sessions := []struct {
+		sessionKey       string
+		transcodeID      string
+		expectedType     string
+		expectedSubtitle string
+	}{
+		{"100", "ts-100-abc", "video", "copy"},
+		{"200", "ts-200-def", "audio", "burn"},
+		{"300", "ts-300-ghi", "both", "none"},
+	}
+
+	// Create sessions and mappings
+	for _, sess := range sessions {
+		m := ttPlex.Metadata{SessionKey: sess.sessionKey}
+		s.mtx.Lock()
+		s.sessions[sess.sessionKey] = session{session: m, state: statePlaying}
+		s.mtx.Unlock()
+		s.SetSessionTranscodeMapping(sess.sessionKey, sess.transcodeID)
+	}
+
+	// Test each session's mapping
+	for _, sess := range sessions {
+		fullPath := "/transcode/sessions/" + sess.transcodeID
+
+		if !s.TrySetTranscodeType(fullPath, sess.expectedType) {
+			t.Fatalf("TrySetTranscodeType should match session %s via transcode mapping", sess.sessionKey)
+		}
+
+		if !s.TrySetSubtitleAction(fullPath, sess.expectedSubtitle) {
+			t.Fatalf("TrySetSubtitleAction should match session %s via transcode mapping", sess.sessionKey)
+		}
+
+		s.mtx.Lock()
+		if s.sessions[sess.sessionKey].transcodeType != sess.expectedType {
+			t.Fatalf("expected transcodeType=%s for session %s, got %q", sess.expectedType, sess.sessionKey, s.sessions[sess.sessionKey].transcodeType)
+		}
+		if s.sessions[sess.sessionKey].subtitleAction != sess.expectedSubtitle {
+			t.Fatalf("expected subtitleAction=%s for session %s, got %q", sess.expectedSubtitle, sess.sessionKey, s.sessions[sess.sessionKey].subtitleAction)
+		}
+		s.mtx.Unlock()
+	}
+}
+
+// TestSessionTranscodeMappingCleanup tests that mappings are cleaned up with sessions
+func TestSessionTranscodeMappingCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create a session that will be stopped and cleaned up
+	m350 := ttPlex.Metadata{SessionKey: "350"}
+	s.mtx.Lock()
+	s.sessions["350"] = session{
+		session:    m350,
+		state:      statePlaying,
+		lastUpdate: time.Now(),
+	}
+	s.mtx.Unlock()
+
+	// Establish mapping
+	s.SetSessionTranscodeMapping("350", "cleanup-test-session")
+
+	// Verify mapping works
+	if !s.TrySetTranscodeType("/transcode/sessions/cleanup-test-session", "video") {
+		t.Fatal("TrySetTranscodeType should work before cleanup")
+	}
+
+	// Stop the session and age it so it gets pruned
+	s.mtx.Lock()
+	ss := s.sessions["350"]
+	ss.state = stateStopped
+	ss.lastUpdate = time.Now().Add(-2 * sessionTimeout) // Make it old enough to be pruned
+	s.sessions["350"] = ss
+	s.mtx.Unlock()
+
+	// Trigger cleanup
+	s.pruneOldSessions()
+
+	// Verify session and mapping are gone
+	s.mtx.Lock()
+	_, sessionExists := s.sessions["350"]
+	_, mappingExists := s.sessionTranscodeMap["350"]
+	s.mtx.Unlock()
+
+	if sessionExists {
+		t.Fatal("Session should be cleaned up")
+	}
+	if mappingExists {
+		t.Fatal("Transcode mapping should be cleaned up with session")
+	}
+
+	// Verify transcode matching no longer works
+	if s.TrySetTranscodeType("/transcode/sessions/cleanup-test-session", "audio") {
+		t.Fatal("TrySetTranscodeType should fail after session cleanup")
+	}
+}
+
+// TestSessionTranscodeMappingOverwrite tests overwriting existing mappings
+func TestSessionTranscodeMappingOverwrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Create session
+	m350 := ttPlex.Metadata{SessionKey: "350"}
+	s.mtx.Lock()
+	s.sessions["350"] = session{session: m350, state: statePlaying}
+	s.mtx.Unlock()
+
+	// Set initial mapping
+	s.SetSessionTranscodeMapping("350", "initial-transcode-id")
+
+	// Verify initial mapping works
+	if !s.TrySetTranscodeType("/transcode/sessions/initial-transcode-id", "video") {
+		t.Fatal("Initial mapping should work")
+	}
+
+	// Overwrite with new mapping (simulates transcode session change)
+	s.SetSessionTranscodeMapping("350", "new-transcode-id")
+
+	// Verify old mapping no longer works
+	if s.TrySetTranscodeType("/transcode/sessions/initial-transcode-id", "audio") {
+		t.Fatal("Old mapping should no longer work")
+	}
+
+	// Verify new mapping works
+	if !s.TrySetTranscodeType("/transcode/sessions/new-transcode-id", "both") {
+		t.Fatal("New mapping should work")
+	}
+
+	s.mtx.Lock()
+	if s.sessions["350"].transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both with new mapping, got %q", s.sessions["350"].transcodeType)
+	}
+	s.mtx.Unlock()
+}
+
+// TestSessionTranscodeMappingRealWorldScenario tests a realistic end-to-end scenario
+func TestSessionTranscodeMappingRealWorldScenario(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewSessions(ctx, &Server{})
+
+	// Simulate real Plex session data
+	session350 := ttPlex.Metadata{
+		SessionKey: "350",
+		User:       ttPlex.User{Title: "technotim", ID: "1"},
+		Player:     ttPlex.Player{Product: "Plex Web", Device: "Chrome"},
+		Title:      "Kingdom of Heaven",
+		RatingKey:  "132029",
+	}
+
+	session352 := ttPlex.Metadata{
+		SessionKey: "352",
+		User:       ttPlex.User{Title: "Cortstewart18", ID: "7633586"},
+		Player:     ttPlex.Player{Product: "Plex for Vizio", Device: "Vizio SmartCast"},
+		Title:      "Wallace & Gromit: The Wrong Trousers",
+		RatingKey:  "131535",
+	}
+
+	// Add sessions (as would happen from GetSessions API call)
+	s.Update("350", statePlaying, &session350, nil)
+	s.Update("352", statePlaying, &session352, nil)
+
+	// Simulate PlaySessionStateNotification events establishing mappings
+	s.SetSessionTranscodeMapping("350", "0yqiuxt8q0ahpntewa4ee6bg")
+	s.SetSessionTranscodeMapping("352", "jtwrf79e85c0a1m1yhntlkow")
+
+	// Simulate websocket transcode session updates (the real scenario that was failing)
+	testCases := []struct {
+		transcodeSessionPath string
+		expectedSessionKey   string
+		transcodeType        string
+		subtitleAction       string
+	}{
+		{"/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg", "350", "both", "burn"},
+		{"/transcode/sessions/jtwrf79e85c0a1m1yhntlkow", "352", "video", "copy"},
+	}
+
+	for _, tc := range testCases {
+		// Both TrySetTranscodeType and TrySetSubtitleAction should succeed
+		transcodeMatched := s.TrySetTranscodeType(tc.transcodeSessionPath, tc.transcodeType)
+		subtitleMatched := s.TrySetSubtitleAction(tc.transcodeSessionPath, tc.subtitleAction)
+
+		if !transcodeMatched {
+			t.Fatalf("TrySetTranscodeType should match session %s for path %s", tc.expectedSessionKey, tc.transcodeSessionPath)
+		}
+		if !subtitleMatched {
+			t.Fatalf("TrySetSubtitleAction should match session %s for path %s", tc.expectedSessionKey, tc.transcodeSessionPath)
+		}
+
+		// Verify the values were set correctly
+		s.mtx.Lock()
+		actualSession := s.sessions[tc.expectedSessionKey]
+		if actualSession.transcodeType != tc.transcodeType {
+			t.Fatalf("expected transcodeType=%s for session %s, got %q", tc.transcodeType, tc.expectedSessionKey, actualSession.transcodeType)
+		}
+		if actualSession.subtitleAction != tc.subtitleAction {
+			t.Fatalf("expected subtitleAction=%s for session %s, got %q", tc.subtitleAction, tc.expectedSessionKey, actualSession.subtitleAction)
+		}
+		s.mtx.Unlock()
+	}
+
+	// Test that non-existent transcode session IDs still fail appropriately
+	if s.TrySetTranscodeType("/transcode/sessions/nonexistent-session-id", "video") {
+		t.Fatal("Non-existent transcode session should not match")
+	}
+}
+
+func TestIntegration_TranscodeSessionMatching(t *testing.T) {
+	// Test the enhanced transcode session matching functionality with realistic websocket data
+	server := &Server{
+		ID:      "test-server-id",
+		Name:    "Test Server",
+		Version: "1.32.5.123",
+		libraries: []*Library{
+			{
+				ID:         "1",
+				Name:       "Movies",
+				Type:       "movie",
+				ItemsCount: 50,
+			},
+		},
+	}
+
+	sess := NewSessions(context.Background(), server)
+
+	// Test case 1: Session with transcode session path in Part.Key (the fix we implemented)
+	session1 := ttPlex.Metadata{
+		SessionKey: "session-123",
+		User: ttPlex.User{
+			Title: "TestUser1",
+		},
+		Player: ttPlex.Player{
+			Platform: "OSX",
+			Product:  "Plex Web",
+		},
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 1",
+		Media: []ttPlex.Media{{
+			Bitrate:         8000,
+			VideoResolution: "1080p",
+			Part: []ttPlex.Part{{
+				Decision: "transcode",
+				Key:      "/transcode/sessions/7bbacc88-6c95-4279-9b6d-f5a2352b665d/file.m3u8", // contains example transcode session ID
+			}},
+		}},
+	}
+
+	media1 := ttPlex.Metadata{
+		RatingKey:        "rating-123",
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 1",
+	}
+
+	// Test case 2: Traditional session matching by SessionKey
+	session2 := ttPlex.Metadata{
+		SessionKey: "websocket-session-456",
+		User: ttPlex.User{
+			Title: "TestUser2",
+		},
+		Player: ttPlex.Player{
+			Platform: "Apple TV",
+			Product:  "Plex for Apple TV",
+		},
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 2",
+		Media: []ttPlex.Media{{
+			Bitrate:         12000,
+			VideoResolution: "4k",
+			Part: []ttPlex.Part{{
+				Decision: "directplay",
+				Key:      "/library/parts/456789",
+			}},
+		}},
+	}
+
+	media2 := ttPlex.Metadata{
+		RatingKey:        "rating-456",
+		LibrarySectionID: ttPlex.FlexibleInt64(1),
+		Type:             "movie",
+		Title:            "Test Movie 2",
+	}
+
+	// Add sessions to the manager
+	sess.Update("session-id-1", statePlaying, &session1, &media1)
+	sess.Update("session-id-2", statePlaying, &session2, &media2)
+
+	t.Run("TranscodeSessionPathMatching", func(t *testing.T) {
+		// Test the new enhanced matching: websocket transcode session ID should match
+		// against the transcode session ID embedded in the Part.Key path
+		// use the same ID referenced in the session Part.Key above
+		websocketTranscodeSessionID := "7bbacc88-6c95-4279-9b6d-f5a2352b665d"
+		result := sess.TrySetTranscodeType(websocketTranscodeSessionID, "hw")
+
+		if !result {
+			t.Fatalf("TrySetTranscodeType should have found a match for transcode session ID %s", websocketTranscodeSessionID)
+		}
+
+		// Verify the correct session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-id-1"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-1 should exist")
+		}
+
+		if session.transcodeType != "hw" {
+			t.Errorf("Expected transcodeType to be 'hw', got %s", session.transcodeType)
+		}
+
+		// Verify the other session was not affected
+		sess.mtx.Lock()
+		session2Check, exists := sess.sessions["session-id-2"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-2 should exist")
+		}
+
+		if session2Check.transcodeType == "hw" {
+			t.Error("Session session-id-2 should not have been affected by the transcode session matching")
+		}
+	})
+
+	t.Run("TraditionalSessionKeyMatching", func(t *testing.T) {
+		// Test traditional matching by SessionKey still works
+		result := sess.TrySetTranscodeType("websocket-session-456", "both")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for SessionKey websocket-session-456")
+		}
+
+		// Verify the correct session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-id-2"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-id-2 should exist")
+		}
+
+		if session.transcodeType != "both" {
+			t.Errorf("Expected transcodeType to be 'both', got %s", session.transcodeType)
+		}
+	})
+
+	t.Run("NoMatchScenario", func(t *testing.T) {
+		// Create a clean sessions manager with only directplay sessions to avoid heuristic fallback
+		cleanServer := &Server{
+			ID:      "test-server-clean",
+			Name:    "Clean Test Server",
+			Version: "1.32.5.123",
+		}
+		cleanSess := NewSessions(context.Background(), cleanServer)
+
+		// Add a session with directplay (no transcode decision to trigger heuristic fallback)
+		directplaySession := ttPlex.Metadata{
+			SessionKey: "directplay-session",
+			User: ttPlex.User{
+				Title: "DirectPlayUser",
+			},
+			Player: ttPlex.Player{
+				Platform: "OSX",
+				Product:  "Plex Web",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Directplay Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         4000,
+				VideoResolution: "1080p",
+				Part: []ttPlex.Part{{
+					Decision: "directplay", // This won't trigger heuristic fallback
+					Key:      "/library/parts/directplay123",
+				}},
+			}},
+		}
+
+		directplayMedia := ttPlex.Metadata{
+			RatingKey:        "rating-directplay",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Directplay Movie",
+		}
+
+		cleanSess.Update("directplay-id", statePlaying, &directplaySession, &directplayMedia)
+
+		// Test case where no session matches and no heuristic fallback applies
+		result := cleanSess.TrySetTranscodeType("nonexistent-session-id", "video")
+
+		if result {
+			t.Error("TrySetTranscodeType should not have found a match for nonexistent session ID with directplay-only sessions")
+		}
+	})
+
+	t.Run("MultipleTranscodeSessionPaths", func(t *testing.T) {
+		// Test session with multiple media parts, some with transcode session paths
+		sessionMulti := ttPlex.Metadata{
+			SessionKey: "session-multi",
+			User: ttPlex.User{
+				Title: "TestUserMulti",
+			},
+			Player: ttPlex.Player{
+				Platform: "Roku",
+				Product:  "Plex for Roku",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Multi Part Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         6000,
+				VideoResolution: "720p",
+				Part: []ttPlex.Part{
+					{
+						Decision: "directplay",
+						Key:      "/library/parts/111",
+					},
+					{
+						Decision: "transcode",
+						Key:      "/transcode/sessions/0yqiuxt8q0ahpntewa4ee6bg/segment.m3u8",
+					},
+				},
+			}},
+		}
+
+		mediaMulti := ttPlex.Metadata{
+			RatingKey:        "rating-multi",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Multi Part Movie",
+		}
+
+		sess.Update("session-multi-id", statePlaying, &sessionMulti, &mediaMulti)
+
+		// Test matching against the transcode session in the second part
+		result := sess.TrySetTranscodeType("0yqiuxt8q0ahpntewa4ee6bg", "video")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for 0yqiuxt8q0ahpntewa4ee6bg in multi-part session")
+		}
+
+		// Verify the session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-multi-id"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-multi-id should exist")
+		}
+
+		if session.transcodeType != "video" {
+			t.Errorf("Expected transcodeType to be 'video', got %s", session.transcodeType)
+		}
+	})
+
+	t.Run("WebsocketFullPathMatching", func(t *testing.T) {
+		// Test the specific case from the user's logs where websocket sends full paths
+		// like tsKey=/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53
+		sessionFullPath := ttPlex.Metadata{
+			SessionKey: "session-fullpath",
+			User: ttPlex.User{
+				Title: "FullPathUser",
+			},
+			Player: ttPlex.Player{
+				Platform: "OSX",
+				Product:  "Plex Web",
+			},
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Full Path Test Movie",
+			Media: []ttPlex.Media{{
+				Bitrate:         8000,
+				VideoResolution: "1080p",
+				Part: []ttPlex.Part{{
+					Decision: "transcode",
+					Key:      "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53/file.m3u8",
+				}},
+			}},
+		}
+
+		mediaFullPath := ttPlex.Metadata{
+			RatingKey:        "rating-fullpath",
+			LibrarySectionID: ttPlex.FlexibleInt64(1),
+			Type:             "movie",
+			Title:            "Full Path Test Movie",
+		}
+
+		sess.Update("session-fullpath-id", statePlaying, &sessionFullPath, &mediaFullPath)
+
+		// Test matching against the FULL websocket path (what we see in logs)
+		websocketFullPath := "/transcode/sessions/41ee19e2-b1f3-4aaf-bcd8-4719a632ae53"
+		result := sess.TrySetTranscodeType(websocketFullPath, "both")
+
+		if !result {
+			t.Fatal("TrySetTranscodeType should have found a match for full websocket path")
+		}
+
+		// Verify the session was updated
+		sess.mtx.Lock()
+		session, exists := sess.sessions["session-fullpath-id"]
+		sess.mtx.Unlock()
+
+		if !exists {
+			t.Fatal("Session session-fullpath-id should exist")
+		}
+
+		if session.transcodeType != "both" {
+			t.Errorf("Expected transcodeType to be 'both', got %s", session.transcodeType)
 		}
 	})
 }

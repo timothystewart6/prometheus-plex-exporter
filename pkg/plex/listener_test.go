@@ -9,11 +9,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/gorilla/websocket"
 	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
@@ -35,7 +40,7 @@ func (f *fakePlexClient) GetTranscodeSessions() (ttPlex.TranscodeSessionsRespons
 type fakePlex struct {
 	sessions     ttPlex.CurrentSessions
 	sessErr      error
-	metadata     ttPlex.MediaMetadata
+	metadataMap  map[string]ttPlex.Metadata // Map of ratingKey -> metadata
 	metaErr      error
 	transcodeErr error
 }
@@ -57,10 +62,21 @@ func (f *fakePlex) GetMetadata(ratingKey string) (ttPlex.MediaMetadata, error) {
 	if f.metaErr != nil {
 		return ttPlex.MediaMetadata{}, f.metaErr
 	}
-	if f.metadata.MediaContainer.Metadata != nil {
-		return f.metadata, nil
+
+	// Use the metadata map to return specific metadata for rating keys
+	if f.metadataMap != nil {
+		if metadata, exists := f.metadataMap[ratingKey]; exists {
+			mm := ttPlex.MediaMetadata{}
+			mm.MediaContainer.Metadata = []ttPlex.Metadata{metadata}
+			return mm, nil
+		}
+		// If metadataMap is explicitly set but rating key not found, return empty response
+		mm := ttPlex.MediaMetadata{}
+		mm.MediaContainer.Metadata = []ttPlex.Metadata{}
+		return mm, nil
 	}
-	// Default metadata for compatibility
+
+	// Default metadata for compatibility (only when metadataMap is nil)
 	mm := ttPlex.MediaMetadata{}
 	mm.MediaContainer.Metadata = []ttPlex.Metadata{{RatingKey: ratingKey, Title: "Episode 1"}}
 	return mm, nil
@@ -791,13 +807,10 @@ func TestOnPlayingEmptyMetadataAfterRetries(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
 
-	// Create metadata with empty metadata array
-	emptyMetadata := ttPlex.MediaMetadata{}
-	emptyMetadata.MediaContainer.Metadata = []ttPlex.Metadata{}
-
+	// Create metadata with empty metadata array - we'll use metadataMap that returns no results
 	l := &plexListener{
 		server:         s,
-		conn:           &fakePlex{metadata: emptyMetadata},
+		conn:           &fakePlex{metadataMap: map[string]ttPlex.Metadata{}}, // Empty map means no metadata found
 		activeSessions: NewSessions(context.Background(), s),
 		log:            logger,
 	}
@@ -1023,5 +1036,561 @@ func TestTrySetSubtitleAction(t *testing.T) {
 	// Test 4: No match found
 	if sessStore.TrySetSubtitleAction("completely_nonexistent", "should_fail") {
 		t.Fatalf("expected TrySetSubtitleAction to return false when no match found")
+	}
+}
+
+// TestOnPlayingHandlerSessionTranscodeMapping tests that the onPlayingHandler correctly captures session transcode mappings
+func TestOnPlayingHandlerSessionTranscodeMapping(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	var buf bytes.Buffer
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(&buf))
+
+	// Create fake client with sessions that match the notification
+	fakeSessions := ttPlex.CurrentSessions{}
+	fakeSessions.MediaContainer.Metadata = []ttPlex.Metadata{
+		{
+			SessionKey: "350",
+			User:       ttPlex.User{Title: "user1", ID: "1"},
+			Player:     ttPlex.Player{Product: "Plex Web"},
+			Title:      "Test Movie",
+			RatingKey:  "123", // Important: must match the notification RatingKey
+		},
+		{
+			SessionKey: "352",
+			User:       ttPlex.User{Title: "user2", ID: "2"},
+			Player:     ttPlex.Player{Product: "Plex for TV"},
+			Title:      "Test Show",
+			RatingKey:  "456", // Important: must match the notification RatingKey
+		},
+	}
+
+	// Create fake metadata responses
+	metadataMap := map[string]ttPlex.Metadata{
+		"123": {RatingKey: "123", Title: "Test Movie"},
+		"456": {RatingKey: "456", Title: "Test Show"},
+	}
+
+	fakePlex := &fakePlex{
+		sessions:    fakeSessions,
+		metadataMap: metadataMap,
+	}
+
+	activeSessions := NewSessions(context.Background(), s)
+
+	l := &plexListener{
+		conn:           fakePlex,
+		activeSessions: activeSessions,
+		log:            logger,
+	}
+
+	// Build PlaySessionStateNotifications with TranscodeSession data like real Plex sends
+	nc := ttPlex.NotificationContainer{
+		PlaySessionStateNotification: []ttPlex.PlaySessionStateNotification{
+			{
+				SessionKey:       "350",
+				RatingKey:        "123",
+				State:            "playing",
+				TranscodeSession: "abc123-transcode-session",
+			},
+			{
+				SessionKey:       "352",
+				RatingKey:        "456",
+				State:            "playing",
+				TranscodeSession: "xyz789-transcode-session",
+			},
+		},
+	}
+
+	// Call the handler (which calls onPlaying internally)
+	l.onPlayingHandler(nc)
+
+	// Verify that session transcode mappings were established
+	activeSessions.mtx.Lock()
+	mapping1, exists1 := activeSessions.sessionTranscodeMap["350"]
+	mapping2, exists2 := activeSessions.sessionTranscodeMap["352"]
+	activeSessions.mtx.Unlock()
+
+	if !exists1 || mapping1 != "abc123-transcode-session" {
+		t.Fatalf("expected session 350 to be mapped to 'abc123-transcode-session', got exists=%v mapping=%q", exists1, mapping1)
+	}
+	if !exists2 || mapping2 != "xyz789-transcode-session" {
+		t.Fatalf("expected session 352 to be mapped to 'xyz789-transcode-session', got exists=%v mapping=%q", exists2, mapping2)
+	}
+
+	// Test that transcode matching now works via the mapping
+	if !activeSessions.TrySetTranscodeType("/transcode/sessions/abc123-transcode-session", "video") {
+		t.Fatal("TrySetTranscodeType should work with established mapping for session 350")
+	}
+	if !activeSessions.TrySetTranscodeType("/transcode/sessions/xyz789-transcode-session", "audio") {
+		t.Fatal("TrySetTranscodeType should work with established mapping for session 352")
+	}
+
+	// Verify the transcode types were set correctly
+	activeSessions.mtx.Lock()
+	if activeSessions.sessions["350"].transcodeType != "video" {
+		t.Fatalf("expected session 350 transcodeType=video, got %q", activeSessions.sessions["350"].transcodeType)
+	}
+	if activeSessions.sessions["352"].transcodeType != "audio" {
+		t.Fatalf("expected session 352 transcodeType=audio, got %q", activeSessions.sessions["352"].transcodeType)
+	}
+	activeSessions.mtx.Unlock()
+}
+
+// TestOnPlayingHandlerEmptyTranscodeSession tests handling of empty TranscodeSession fields
+func TestOnPlayingHandlerEmptyTranscodeSession(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	fakeSessions := ttPlex.CurrentSessions{}
+	fakeSessions.MediaContainer.Metadata = []ttPlex.Metadata{
+		{SessionKey: "350", User: ttPlex.User{Title: "user1"}, RatingKey: "123"},
+	}
+
+	fakeMetadata := map[string]ttPlex.Metadata{
+		"123": {RatingKey: "123", Title: "Test Movie"},
+	}
+
+	fakePlex := &fakePlex{
+		sessions:    fakeSessions,
+		metadataMap: fakeMetadata,
+	}
+
+	activeSessions := NewSessions(context.Background(), s)
+
+	l := &plexListener{
+		conn:           fakePlex,
+		activeSessions: activeSessions,
+		log:            log.NewNopLogger(),
+	}
+
+	// PlaySessionStateNotification with empty TranscodeSession (direct play scenario)
+	nc := ttPlex.NotificationContainer{
+		PlaySessionStateNotification: []ttPlex.PlaySessionStateNotification{
+			{
+				SessionKey:       "350",
+				RatingKey:        "123",
+				State:            "playing",
+				TranscodeSession: "", // Empty - direct play
+			},
+		},
+	}
+
+	l.onPlayingHandler(nc)
+
+	// Verify that no mapping was created for empty transcode session
+	activeSessions.mtx.Lock()
+	_, exists := activeSessions.sessionTranscodeMap["350"]
+	activeSessions.mtx.Unlock()
+
+	if exists {
+		t.Fatal("No mapping should be created for empty TranscodeSession")
+	}
+}
+
+// TestOnPlayingHandlerMappingOverwrite tests that mappings can be overwritten when sessions change
+func TestOnPlayingHandlerMappingOverwrite(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	fakeSessions := ttPlex.CurrentSessions{}
+	fakeSessions.MediaContainer.Metadata = []ttPlex.Metadata{
+		{SessionKey: "350", User: ttPlex.User{Title: "user1"}, RatingKey: "123"},
+	}
+
+	fakeMetadata := map[string]ttPlex.Metadata{
+		"123": {RatingKey: "123", Title: "Test Movie"},
+	}
+
+	fakePlex := &fakePlex{
+		sessions:    fakeSessions,
+		metadataMap: fakeMetadata,
+	}
+
+	activeSessions := NewSessions(context.Background(), s)
+
+	l := &plexListener{
+		conn:           fakePlex,
+		activeSessions: activeSessions,
+		log:            log.NewNopLogger(),
+	}
+
+	// First notification with initial transcode session
+	nc1 := ttPlex.NotificationContainer{
+		PlaySessionStateNotification: []ttPlex.PlaySessionStateNotification{
+			{
+				SessionKey:       "350",
+				RatingKey:        "123",
+				State:            "playing",
+				TranscodeSession: "initial-transcode-id",
+			},
+		},
+	}
+
+	l.onPlayingHandler(nc1)
+
+	// Verify initial mapping
+	activeSessions.mtx.Lock()
+	mapping, exists := activeSessions.sessionTranscodeMap["350"]
+	activeSessions.mtx.Unlock()
+	if !exists || mapping != "initial-transcode-id" {
+		t.Fatalf("expected initial mapping to 'initial-transcode-id', got exists=%v mapping=%q", exists, mapping)
+	}
+
+	// Second notification with different transcode session (simulates quality change)
+	nc2 := ttPlex.NotificationContainer{
+		PlaySessionStateNotification: []ttPlex.PlaySessionStateNotification{
+			{
+				SessionKey:       "350",
+				RatingKey:        "123",
+				State:            "playing",
+				TranscodeSession: "updated-transcode-id",
+			},
+		},
+	}
+
+	l.onPlayingHandler(nc2)
+
+	// Verify mapping was updated
+	activeSessions.mtx.Lock()
+	updatedMapping, exists := activeSessions.sessionTranscodeMap["350"]
+	activeSessions.mtx.Unlock()
+	if !exists || updatedMapping != "updated-transcode-id" {
+		t.Fatalf("expected updated mapping to 'updated-transcode-id', got exists=%v mapping=%q", exists, updatedMapping)
+	}
+
+	// Verify old mapping no longer works
+	if activeSessions.TrySetTranscodeType("/transcode/sessions/initial-transcode-id", "video") {
+		t.Fatal("Old transcode mapping should no longer work")
+	}
+
+	// Verify new mapping works
+	if !activeSessions.TrySetTranscodeType("/transcode/sessions/updated-transcode-id", "video") {
+		t.Fatal("New transcode mapping should work")
+	}
+}
+
+// TestOnPlayingHandlerMultipleSessionsNotification tests handling multiple sessions in one notification
+func TestOnPlayingHandlerMultipleSessionsNotification(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	fakeSessions := ttPlex.CurrentSessions{}
+	fakeSessions.MediaContainer.Metadata = []ttPlex.Metadata{
+		{SessionKey: "100", User: ttPlex.User{Title: "user1"}, RatingKey: "1001"},
+		{SessionKey: "200", User: ttPlex.User{Title: "user2"}, RatingKey: "2001"},
+		{SessionKey: "300", User: ttPlex.User{Title: "user3"}, RatingKey: "3001"},
+	}
+
+	fakeMetadata := map[string]ttPlex.Metadata{
+		"1001": {RatingKey: "1001", Title: "Movie 1"},
+		"2001": {RatingKey: "2001", Title: "Movie 2"},
+		"3001": {RatingKey: "3001", Title: "Movie 3"},
+	}
+
+	fakePlex := &fakePlex{
+		sessions:    fakeSessions,
+		metadataMap: fakeMetadata,
+	}
+
+	activeSessions := NewSessions(context.Background(), s)
+
+	l := &plexListener{
+		conn:           fakePlex,
+		activeSessions: activeSessions,
+		log:            log.NewNopLogger(),
+	}
+
+	// Notification with multiple sessions having different transcode states
+	nc := ttPlex.NotificationContainer{
+		PlaySessionStateNotification: []ttPlex.PlaySessionStateNotification{
+			{
+				SessionKey:       "100",
+				RatingKey:        "1001",
+				State:            "playing",
+				TranscodeSession: "ts-100-abc",
+			},
+			{
+				SessionKey:       "200",
+				RatingKey:        "2001",
+				State:            "playing",
+				TranscodeSession: "", // Direct play
+			},
+			{
+				SessionKey:       "300",
+				RatingKey:        "3001",
+				State:            "playing",
+				TranscodeSession: "ts-300-xyz",
+			},
+		},
+	}
+
+	l.onPlayingHandler(nc)
+
+	// Verify mappings for transcode sessions
+	activeSessions.mtx.Lock()
+	mapping100, exists100 := activeSessions.sessionTranscodeMap["100"]
+	_, exists200 := activeSessions.sessionTranscodeMap["200"]
+	mapping300, exists300 := activeSessions.sessionTranscodeMap["300"]
+	activeSessions.mtx.Unlock()
+
+	if !exists100 || mapping100 != "ts-100-abc" {
+		t.Fatalf("expected session 100 mapping to 'ts-100-abc', got exists=%v mapping=%q", exists100, mapping100)
+	}
+	if exists200 {
+		t.Fatal("session 200 should not have mapping (direct play)")
+	}
+	if !exists300 || mapping300 != "ts-300-xyz" {
+		t.Fatalf("expected session 300 mapping to 'ts-300-xyz', got exists=%v mapping=%q", exists300, mapping300)
+	}
+
+	// Test that only transcoding sessions work with mapping
+	if !activeSessions.TrySetTranscodeType("/transcode/sessions/ts-100-abc", "video") {
+		t.Fatal("session 100 should match via mapping")
+	}
+	if activeSessions.TrySetTranscodeType("/transcode/sessions/nonexistent", "audio") {
+		t.Fatal("session 200 (direct play) should not match any transcode path")
+	}
+	if !activeSessions.TrySetTranscodeType("/transcode/sessions/ts-300-xyz", "both") {
+		t.Fatal("session 300 should match via mapping")
+	}
+}
+
+// Test handler when activeSessions is nil — should not panic and should be no-op.
+func TestOnTranscodeUpdateHandlerNilActiveSessions(t *testing.T) {
+	l := &plexListener{activeSessions: nil, log: log.NewNopLogger()}
+	c := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "noactive", VideoCodec: "hevc", SourceVideoCodec: "h264"}}}
+	l.onTranscodeUpdateHandler(c) // must not panic
+}
+
+// Test that handler creates/sets a session transcodeType even when session didn't exist.
+func TestOnTranscodeUpdateHandlerCreatesSession(t *testing.T) {
+	sessStore := &sessions{sessions: map[string]session{}, server: &Server{Name: "srv", ID: "id"}}
+	l := &plexListener{activeSessions: sessStore, log: log.NewNopLogger()}
+
+	ts := ttPlex.TranscodeSession{Key: "s-create", SourceAudioCodec: "aac", AudioCodec: "mp3"}
+	c := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{ts}}
+	l.onTranscodeUpdateHandler(c)
+
+	ss, ok := sessStore.sessions[ts.Key]
+	if !ok {
+		t.Fatalf("expected session %q to exist", ts.Key)
+	}
+	if ss.transcodeType != "audio" {
+		t.Fatalf("expected transcodeType=audio, got %q", ss.transcodeType)
+	}
+	if ss.subtitleAction != "none" {
+		t.Fatalf("expected subtitleAction=none, got %q", ss.subtitleAction)
+	}
+}
+
+// Concurrent updates should not cause races; final value should be one of expected.
+func TestOnTranscodeUpdateHandlerConcurrent(t *testing.T) {
+	sessStore := &sessions{sessions: map[string]session{}, server: &Server{Name: "srv", ID: "id"}}
+	l := &plexListener{activeSessions: sessStore, log: log.NewNopLogger()}
+
+	var wg sync.WaitGroup
+	kinds := []ttPlex.TranscodeSession{
+		{Key: "concurrent", SourceVideoCodec: "h264", VideoCodec: "vp9"},
+		{Key: "concurrent", SourceAudioCodec: "aac", AudioCodec: "mp3"},
+		{Key: "concurrent", SourceVideoCodec: "h264", VideoCodec: "hevc", SourceAudioCodec: "aac", AudioCodec: "ac3"},
+		{Key: "concurrent"},
+	}
+
+	for i := 0; i < 50; i++ {
+		for _, k := range kinds {
+			wg.Add(1)
+			go func(ts ttPlex.TranscodeSession) {
+				defer wg.Done()
+				c := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{ts}}
+				l.onTranscodeUpdateHandler(c)
+			}(k)
+		}
+	}
+	wg.Wait()
+
+	ss, ok := sessStore.sessions["concurrent"]
+	if !ok {
+		t.Fatalf("expected session 'concurrent' to exist")
+	}
+	switch ss.transcodeType {
+	case "audio", "video", "both", "unknown":
+		// ok
+	default:
+		t.Fatalf("unexpected transcodeType %q", ss.transcodeType)
+	}
+	// subtitleAction should be one of these (or none)
+	switch ss.subtitleAction {
+	case "none", "copy", "burn":
+		// ok
+	default:
+		t.Fatalf("unexpected subtitleAction %q", ss.subtitleAction)
+	}
+}
+
+// fakeRetry simulates GetSessions returning empty first, then returning the session.
+type fakeRetry struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *fakeRetry) GetSessions() (ttPlex.CurrentSessions, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.calls == 0 {
+		f.calls++
+		return ttPlex.CurrentSessions{}, nil
+	}
+	// return a session matching sess1
+	s := ttPlex.CurrentSessions{}
+	s.MediaContainer.Metadata = []ttPlex.Metadata{{SessionKey: "sess1", User: ttPlex.User{Title: "u1", ID: "id1"}}}
+	return s, nil
+}
+
+func (f *fakeRetry) GetMetadata(ratingKey string) (ttPlex.MediaMetadata, error) {
+	mm := ttPlex.MediaMetadata{}
+	mm.MediaContainer.Metadata = []ttPlex.Metadata{{RatingKey: ratingKey, Title: "E1"}}
+	return mm, nil
+}
+
+func (f *fakeRetry) GetTranscodeSessions() (ttPlex.TranscodeSessionsResponse, error) {
+	return ttPlex.TranscodeSessionsResponse{}, nil
+}
+
+func TestOnPlayingRetriesGetSessions(t *testing.T) {
+	// speed up retries for test
+	oldMax := SessionLookupMaxRetries
+	oldBase := SessionLookupBaseDelay
+	SessionLookupMaxRetries = 3
+	SessionLookupBaseDelay = 1 * time.Millisecond
+	defer func() { SessionLookupMaxRetries = oldMax; SessionLookupBaseDelay = oldBase }()
+
+	s := &Server{Name: "srv", ID: "id"}
+	l := &plexListener{
+		server:         s,
+		conn:           &fakeRetry{},
+		activeSessions: &sessions{sessions: map[string]session{}, server: s},
+		log:            log.NewNopLogger(),
+	}
+
+	c := ttPlex.NotificationContainer{}
+	c.PlaySessionStateNotification = []ttPlex.PlaySessionStateNotification{{SessionKey: "sess1", RatingKey: "rk1", State: "playing", ViewOffset: 0}}
+
+	if err := l.onPlaying(c); err != nil {
+		t.Fatalf("onPlaying failed: %v", err)
+	}
+
+	if _, ok := l.activeSessions.sessions["sess1"]; !ok {
+		t.Fatalf("expected session sess1 to be present after retries")
+	}
+}
+
+// TestListen_SuccessfulSubscribePath verifies that Server.Listen returns when
+// the websocket notifications connection closes normally. It overrides
+// newPlex to construct a client pointed at an httptest websocket server which
+// immediately sends a normal close frame.
+func TestListen_SuccessfulSubscribePath(t *testing.T) {
+	// httptest server that upgrades to websocket and immediately closes
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var upgrader websocket.Upgrader
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Logf("upgrade error: %v", err)
+			return
+		}
+		// Send a normal close so the client's read loop returns a CloseError
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		_ = conn.Close()
+	}))
+	defer ts.Close()
+
+	// override newPlex to return a client that points at our test server
+	old := newPlex
+	newPlex = func(base, token string) (*ttPlex.Plex, error) {
+		return ttPlex.New(base, token)
+	}
+	defer func() { newPlex = old }()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	s := &Server{URL: u, Token: "tok"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Expect Listen to return (nil on normal closure)
+	if err := s.Listen(ctx, log.NewNopLogger()); err != nil {
+		t.Fatalf("Listen returned error: %v", err)
+	}
+}
+
+func TestSubscribeToNotifications_InvokesEventHandler(t *testing.T) {
+	// Start a test server that upgrades websocket connections and sends a single notification
+	serverDone := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/:/websockets/notifications" {
+			http.NotFound(w, r)
+			return
+		}
+		up := websocket.Upgrader{}
+		c, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade failed: %v", err)
+		}
+		defer c.Close()
+
+		// send a transcodeSession.update notification (NotificationContainer.type must be set)
+		msg := `{"NotificationContainer":{"TranscodeSession":[{"key":"k1","videoDecision":"transcode","subtitleDecision":"copy","container":"mp4"}],"type":"transcodeSession.update"}}`
+		if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+			t.Fatalf("write message: %v", err)
+		}
+
+		// keep the connection open until the test signals serverDone
+		<-serverDone
+	}))
+	defer srv.Close()
+
+	// Create a Plex client pointing at the test server
+	p, err := ttPlex.New(srv.URL, "token")
+	if err != nil {
+		t.Fatalf("failed to create plex client: %v", err)
+	}
+
+	events := ttPlex.NewNotificationEvents()
+	called := make(chan struct{}, 1)
+	events.OnTranscodeUpdate(func(n ttPlex.NotificationContainer) {
+		called <- struct{}{}
+	})
+
+	// interrupt channel: close after timeout to allow SubscribeToNotifications to exit
+	intr := make(chan os.Signal, 1)
+
+	var gotErr error
+	done := make(chan struct{})
+	var doneOnce sync.Once
+	go func() {
+		p.SubscribeToNotifications(events, intr, func(e error) {
+			gotErr = e
+			doneOnce.Do(func() { close(done) })
+		})
+	}()
+
+	select {
+	case <-called:
+		// success
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for event handler to be called")
+	}
+
+	// close interrupt to make SubscribeToNotifications return
+	close(intr)
+
+	// allow server handler to return (which closes the server-side websocket)
+	close(serverDone)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for SubscribeToNotifications to finish")
+	}
+
+	if gotErr != nil {
+		t.Logf("SubscribeToNotifications reported error (acceptable): %v", gotErr)
 	}
 }

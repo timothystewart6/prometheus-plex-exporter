@@ -76,3 +76,70 @@ func TestTranscodeKind(t *testing.T) {
 		})
 	}
 }
+
+func TestTranscodeKind_RealWorldScenarios(t *testing.T) {
+	// Test cases based on actual Prometheus data patterns
+	testCases := []struct {
+		name     string
+		session  ttPlex.TranscodeSession
+		expected string
+	}{
+		{
+			name: "Wizard_of_Oz_Both_Transcode",
+			session: ttPlex.TranscodeSession{
+				VideoDecision:    "transcode",
+				AudioDecision:    "transcode",
+				VideoCodec:       "h264",
+				AudioCodec:       "aac",
+				SourceVideoCodec: "h264",
+				SourceAudioCodec: "ac3",
+			},
+			expected: "both",
+		},
+		{
+			name: "Back_to_the_Future_DirectPlay",
+			session: ttPlex.TranscodeSession{
+				VideoDecision:    "directplay",
+				AudioDecision:    "directplay",
+				VideoCodec:       "h264",
+				AudioCodec:       "aac",
+				SourceVideoCodec: "h264",
+				SourceAudioCodec: "aac",
+			},
+			expected: "unknown", // No actual transcoding happening
+		},
+		{
+			name: "Apple_TV_Both_Transcode",
+			session: ttPlex.TranscodeSession{
+				VideoDecision:    "transcode",
+				AudioDecision:    "transcode",
+				VideoCodec:       "h264",
+				AudioCodec:       "aac",
+				SourceVideoCodec: "hevc",
+				SourceAudioCodec: "dts",
+			},
+			expected: "both",
+		},
+		{
+			name: "Roku_Video_Only_Transcode",
+			session: ttPlex.TranscodeSession{
+				VideoDecision:    "transcode",
+				AudioDecision:    "directplay",
+				VideoCodec:       "h264",
+				AudioCodec:       "aac",
+				SourceVideoCodec: "hevc",
+				SourceAudioCodec: "aac",
+			},
+			expected: "video",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := transcodeKind(tc.session)
+			if result != tc.expected {
+				t.Errorf("Expected %s, got %s for %s", tc.expected, result, tc.name)
+			}
+		})
+	}
+}
