@@ -9,7 +9,7 @@ GOARCH ?= $(shell go env GOARCH)
 
 GOPATH := $(shell go env GOPATH)
 
-GO_OPT= -mod vendor -ldflags "-X main.Branch=$(GIT_BRANCH) -X main.Revision=$(GIT_REVISION) -X main.Version=$(VERSION)"
+GO_OPT= -mod vendor -ldflags "-X main.Branch=$(GIT_BRANCH) -X main.Revision=$(GIT_REVISION) -X main.Version=$(VERSION) -s -w"
 
 ### Development
 
