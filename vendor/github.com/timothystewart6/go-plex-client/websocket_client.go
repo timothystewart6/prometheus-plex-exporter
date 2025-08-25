@@ -264,6 +264,7 @@ func NewNotificationEvents() *NotificationEvents {
 	return &NotificationEvents{
 		events: map[string]func(n NotificationContainer){
 			"timeline":                  func(n NotificationContainer) {},
+			"provider.content.change":   func(n NotificationContainer) {},
 			"playing":                   func(n NotificationContainer) {},
 			"reachability":              func(n NotificationContainer) {},
 			"transcode.end":             func(n NotificationContainer) {},
@@ -290,6 +291,11 @@ func (e *NotificationEvents) OnTimeline(fn func(n NotificationContainer)) {
 // OnTranscodeUpdate shows transcode information when a transcoding stream changes parameters
 func (e *NotificationEvents) OnTranscodeUpdate(fn func(n NotificationContainer)) {
 	e.events["transcodeSession.update"] = fn
+}
+
+// OnProviderContentChange registers a callback for provider.content.change events.
+func (e *NotificationEvents) OnProviderContentChange(fn func(n NotificationContainer)) {
+	e.events["provider.content.change"] = fn
 }
 
 // SubscribeToNotifications connects to your server via websockets listening for events
