@@ -220,6 +220,12 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 				subtitle = "burn"
 			} else if sd == "copy" || sd == "copying" {
 				subtitle = "copy"
+			} else if sd == "transcode" || sd == "transcoding" {
+				// Plex may report subtitleDecision as "transcode" when the
+				// subtitle track is being converted/transcoded during playback.
+				// Preserve this as its own action so metrics can distinguish
+				// explicit transcode behavior from an actual burn.
+				subtitle = "transcode"
 			}
 		} else {
 			ctn := strings.ToLower(strings.TrimSpace(ts.Container))
@@ -323,6 +329,11 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 							subFromAPI = "burn"
 						} else if sdec == "copy" || sdec == "copying" {
 							subFromAPI = "copy"
+						} else if sdec == "transcode" || sdec == "transcoding" {
+							// Preserve API-reported "transcode" as its own
+							// subtitle action so callers can distinguish it from
+							// an explicit burn.
+							subFromAPI = "transcode"
 						}
 					} else {
 						ctn := strings.ToLower(strings.TrimSpace(t.Container))
