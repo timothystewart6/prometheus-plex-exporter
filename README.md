@@ -16,11 +16,12 @@
 
 Monitor your Plex Media Server with comprehensive real-time metrics including:
 
-- **Real-time Session Monitoring** - Live WebSocket tracking of playback sessions and state changes
+ 
 - **Advanced Transcode Analytics** - Detailed transcode type detection (video/audio/both) and subtitle handling
-- **Storage & Library Metrics** - Library sizes, media counts, and disk usage across all sections
-- **Server Performance** - CPU/memory utilization and system health indicators
 - **Network & Bandwidth** - Real-time transmission tracking and bandwidth monitoring
+- **Real-time Session Monitoring** - Live WebSocket tracking of playback sessions and state changes
+- **Server Performance** - CPU/memory utilization and system health indicators
+- **Storage & Library Metrics** - Library sizes, media counts, and disk usage across all sections
 
 ## Quick Start
 
@@ -66,45 +67,52 @@ The exporter provides comprehensive real-time metrics about your Plex server via
 
 ### Server Metrics
 
-- `server_info` - Server information with version, platform details
-- `host_cpu_util` - Host CPU utilization percentage  
+ 
+- `host_cpu_util` - Host CPU utilization percentage
 - `host_mem_util` - Host memory utilization percentage
+- `server_info` - Server information with version, platform details
 
 ### Library Metrics
 
+ 
 - `library_duration_total` - Total duration of library content in milliseconds
 - `library_storage_total` - Total storage size of library in bytes
-- `plex_library_items` - Number of items in each library section
+ 
 
 ### Media Count Metrics
 
-- `plex_media_movies` - Total number of movies across all libraries
+ 
+- `plex_library_items` - Number of items in each library section
 - `plex_media_episodes` - Total number of TV episodes across all libraries
 - `plex_media_music` - Total number of music tracks across all libraries
-- `plex_media_photos` - Total number of photos across all libraries
+- `plex_media_movies` - Total number of movies across all libraries
 - `plex_media_other_videos` - Total number of other videos (home videos) across all libraries
+- `plex_media_photos` - Total number of photos across all libraries
 
 ### Real-time Session/Playback Metrics
 
-- `plays_total` - Total play counts with detailed labels (user, device, media, transcode info)
-- `play_seconds_total` - Total playback duration per session in seconds
+ 
 - `estimated_transmit_bytes_total` - Estimated bytes transmitted to clients
+- `play_seconds_total` - Total playback duration per session in seconds
+- `plays_total` - Total play counts with detailed labels (user, device, media, transcode info)
 - `transmit_bytes_total` - Actual bytes transmitted to clients
 
 ### Advanced Transcode Metrics
 
 All session metrics include sophisticated transcode detection:
 
-- **Transcode Type**: `video`, `audio`, `both`, or `none` based on codec analysis
-- **Subtitle Actions**: `burn`, `copy`, or `none` for subtitle handling
+ 
 - **Stream Analysis**: Source vs destination resolution, bitrate, and codec comparison
+- **Subtitle Actions**: `burn`, `copy`, `none`, or `transcode` for subtitle handling
+- **Transcode Type**: `video`, `audio`, `both`, or `none` based on codec analysis
 
 ### Available Labels
 
 All metrics include relevant labels for detailed filtering and grouping:
 
-- **Server labels**: `server_type`, `server`, `server_id`
+ 
 - **Library labels**: `library_type`, `library`, `library_id`
+- **Server labels**: `server_type`, `server`, `server_id`
 - **Session labels**: `media_type`, `title`, `child_title`, `grandchild_title`, `stream_type`, `stream_resolution`, `stream_file_resolution`, `stream_bitrate`, `device`, `device_type`, `user`, `session`, `transcode_type`, `subtitle_action`
 
 ## Grafana Dashboard

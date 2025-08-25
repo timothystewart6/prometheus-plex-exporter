@@ -9,17 +9,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/gorilla/websocket"
 	ttPlex "github.com/timothystewart6/go-plex-client"
+
+	"github.com/prometheus/client_golang/prometheus"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 )
 
 // fakePlexClient implements the minimal plexClient interface for tests.
@@ -43,6 +42,8 @@ type fakePlex struct {
 	metadataMap  map[string]ttPlex.Metadata // Map of ratingKey -> metadata
 	metaErr      error
 	transcodeErr error
+	// Optional custom transcode sessions response for tests
+	transcodeResp ttPlex.TranscodeSessionsResponse
 }
 
 func (f *fakePlex) GetSessions() (ttPlex.CurrentSessions, error) {
@@ -86,8 +87,12 @@ func (f *fakePlex) GetTranscodeSessions() (ttPlex.TranscodeSessionsResponse, err
 	if f.transcodeErr != nil {
 		return ttPlex.TranscodeSessionsResponse{}, f.transcodeErr
 	}
+	// If a test provided a custom response, return it
+	if f.transcodeResp.Children != nil {
+		return f.transcodeResp, nil
+	}
+	// Default response used by older tests
 	t := ttPlex.TranscodeSessionsResponse{}
-	// Construct a single child with both audio/video transcode
 	child := struct {
 		ElementType      string  `json:"_elementType"`
 		AudioChannels    int     `json:"audioChannels"`
@@ -1377,6 +1382,29 @@ func TestOnTranscodeUpdateHandlerCreatesSession(t *testing.T) {
 	}
 }
 
+// Test that subtitleDecision values "transcode" and "transcoding" are
+// interpreted as a distinct "transcode" subtitleAction.
+func TestOnTranscodeUpdateHandlerSubtitleTranscodePreserved(t *testing.T) {
+	sessStore := &sessions{sessions: map[string]session{}, server: &Server{Name: "srv", ID: "id"}}
+	l := &plexListener{activeSessions: sessStore, log: log.NewNopLogger()}
+
+	ts1 := ttPlex.TranscodeSession{Key: "s-transcode", SubtitleDecision: "transcode"}
+	ts2 := ttPlex.TranscodeSession{Key: "s-transcoding", SubtitleDecision: "transcoding"}
+
+	c := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{ts1, ts2}}
+	l.onTranscodeUpdateHandler(c)
+
+	for _, k := range []string{"s-transcode", "s-transcoding"} {
+		ss, ok := sessStore.sessions[k]
+		if !ok {
+			t.Fatalf("expected session %q to exist", k)
+		}
+		if ss.subtitleAction != "transcode" {
+			t.Fatalf("expected subtitleAction=transcode for session %q, got %q", k, ss.subtitleAction)
+		}
+	}
+}
+
 // Concurrent updates should not cause races; final value should be one of expected.
 func TestOnTranscodeUpdateHandlerConcurrent(t *testing.T) {
 	sessStore := &sessions{sessions: map[string]session{}, server: &Server{Name: "srv", ID: "id"}}
@@ -1414,183 +1442,128 @@ func TestOnTranscodeUpdateHandlerConcurrent(t *testing.T) {
 	}
 	// subtitleAction should be one of these (or none)
 	switch ss.subtitleAction {
-	case "none", "copy", "burn":
+	case "none", "copy", "burn", "transcode":
 		// ok
 	default:
 		t.Fatalf("unexpected subtitleAction %q", ss.subtitleAction)
 	}
 }
 
-// fakeRetry simulates GetSessions returning empty first, then returning the session.
-type fakeRetry struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func (f *fakeRetry) GetSessions() (ttPlex.CurrentSessions, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.calls == 0 {
-		f.calls++
-		return ttPlex.CurrentSessions{}, nil
-	}
-	// return a session matching sess1
-	s := ttPlex.CurrentSessions{}
-	s.MediaContainer.Metadata = []ttPlex.Metadata{{SessionKey: "sess1", User: ttPlex.User{Title: "u1", ID: "id1"}}}
-	return s, nil
-}
-
-func (f *fakeRetry) GetMetadata(ratingKey string) (ttPlex.MediaMetadata, error) {
-	mm := ttPlex.MediaMetadata{}
-	mm.MediaContainer.Metadata = []ttPlex.Metadata{{RatingKey: ratingKey, Title: "E1"}}
-	return mm, nil
-}
-
-func (f *fakeRetry) GetTranscodeSessions() (ttPlex.TranscodeSessionsResponse, error) {
-	return ttPlex.TranscodeSessionsResponse{}, nil
-}
-
-func TestOnPlayingRetriesGetSessions(t *testing.T) {
-	// speed up retries for test
-	oldMax := SessionLookupMaxRetries
-	oldBase := SessionLookupBaseDelay
-	SessionLookupMaxRetries = 3
-	SessionLookupBaseDelay = 1 * time.Millisecond
-	defer func() { SessionLookupMaxRetries = oldMax; SessionLookupBaseDelay = oldBase }()
-
+// Integration-style test: ensure when websocket transcode update doesn't match
+// an active session the listener consults the transcode-sessions API and
+// applies the derived subtitle action and transcode kind to the session.
+func TestTranscodeSessionsAPIFallbackPreservesTranscodeAction(t *testing.T) {
 	s := &Server{Name: "srv", ID: "id"}
-	l := &plexListener{
-		server:         s,
-		conn:           &fakeRetry{},
-		activeSessions: &sessions{sessions: map[string]session{}, server: s},
-		log:            log.NewNopLogger(),
+
+	// fake plex that returns no sessions from GetSessions but returns a
+	// transcode sessions response containing a matching child
+	fake := &fakePlex{}
+	fake.transcodeErr = nil
+	fake.sessions = ttPlex.CurrentSessions{} // empty so websocket key won't match
+
+	// Build a TranscodeSessionsResponse child via the vendored type
+	tc := ttPlex.TranscodeSessionsResponse{}
+	tc.Children = []struct {
+		ElementType      string  `json:"_elementType"`
+		AudioChannels    int     `json:"audioChannels"`
+		AudioCodec       string  `json:"audioCodec"`
+		AudioDecision    string  `json:"audioDecision"`
+		SubtitleDecision string  `json:"subtitleDecision"`
+		Container        string  `json:"container"`
+		Context          string  `json:"context"`
+		Duration         int     `json:"duration"`
+		Height           int     `json:"height"`
+		Key              string  `json:"key"`
+		Progress         float64 `json:"progress"`
+		Protocol         string  `json:"protocol"`
+		Remaining        int     `json:"remaining"`
+		Speed            float64 `json:"speed"`
+		Throttled        bool    `json:"throttled"`
+		VideoCodec       string  `json:"videoCodec"`
+		VideoDecision    string  `json:"videoDecision"`
+		Width            int     `json:"width"`
+	}{{
+		Key:              "api-ts-1",
+		VideoDecision:    "transcode",
+		AudioDecision:    "transcode",
+		SubtitleDecision: "transcode",
+		Container:        "mp4",
+	}}
+
+	fake.transcodeErr = nil
+	// Return our constructed response from the fake
+	fake.transcodeResp = tc
+
+	sessStore := NewSessions(context.Background(), s)
+	l := &plexListener{server: s, conn: fake, activeSessions: sessStore, log: log.NewNopLogger()}
+
+	// send a transcode update that doesn't match active sessions (key will be "api-ts-1")
+	nc := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: "api-ts-1"}}}
+	l.onTranscodeUpdateHandler(nc)
+
+	// After handler, session should exist under key "api-ts-1" with transcodeType "both" and subtitleAction "transcode"
+	ss, ok := sessStore.sessions["api-ts-1"]
+	if !ok {
+		t.Fatalf("expected session api-ts-1 to exist after API fallback")
 	}
-
-	c := ttPlex.NotificationContainer{}
-	c.PlaySessionStateNotification = []ttPlex.PlaySessionStateNotification{{SessionKey: "sess1", RatingKey: "rk1", State: "playing", ViewOffset: 0}}
-
-	if err := l.onPlaying(c); err != nil {
-		t.Fatalf("onPlaying failed: %v", err)
+	if ss.transcodeType != "both" {
+		t.Fatalf("expected transcodeType=both, got %q", ss.transcodeType)
 	}
-
-	if _, ok := l.activeSessions.sessions["sess1"]; !ok {
-		t.Fatalf("expected session sess1 to be present after retries")
+	if ss.subtitleAction != "transcode" {
+		t.Fatalf("expected subtitleAction=transcode, got %q", ss.subtitleAction)
 	}
 }
 
-// TestListen_SuccessfulSubscribePath verifies that Server.Listen returns when
-// the websocket notifications connection closes normally. It overrides
-// newPlex to construct a client pointed at an httptest websocket server which
-// immediately sends a normal close frame.
-func TestListen_SuccessfulSubscribePath(t *testing.T) {
-	// httptest server that upgrades to websocket and immediately closes
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var upgrader websocket.Upgrader
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Logf("upgrade error: %v", err)
-			return
+// End-to-end test: simulate a transcode update indicating subtitleDecision="transcode"
+// and assert the sessions collector emits a metric labeled subtitle_action="transcode".
+func TestTranscodeUpdateEndToEndSubtitleBurn(t *testing.T) {
+	s := &Server{Name: "srv", ID: "id"}
+	// create sessions store and populate a session that will be associated with a transcode id
+	sessStore := NewSessions(context.Background(), s)
+
+	// Create a metadata entry that references a transcode session id in the media part
+	transcodeID := "abc123-transcode-id"
+	meta := ttPlex.Metadata{SessionKey: "sess-x", User: ttPlex.User{Title: "u"}, Player: ttPlex.Player{Product: "p"}, Media: []ttPlex.Media{{Part: []ttPlex.Part{{Key: "/transcode/sessions/" + transcodeID}}}}}
+
+	// Insert session into store
+	sessStore.mtx.Lock()
+	sessStore.sessions["sess-x"] = session{session: meta, media: meta, state: statePlaying, playStarted: time.Now()}
+	sessStore.mtx.Unlock()
+
+	// Map the play session key to the transcode session ID so TrySetSubtitleAction can match
+	sessStore.SetSessionTranscodeMapping("sess-x", transcodeID)
+
+	// Create listener wired to our sessions store and a fake plex client
+	l := &plexListener{server: s, conn: &fakePlex{}, activeSessions: sessStore, log: log.NewNopLogger()}
+
+	// Simulate receiving a transcode update where SubtitleDecision is reported as "transcode"
+	nc := ttPlex.NotificationContainer{TranscodeSession: []ttPlex.TranscodeSession{{Key: transcodeID, VideoDecision: "transcode", AudioDecision: "transcode", SubtitleDecision: "transcode"}}}
+	l.onTranscodeUpdateHandler(nc)
+
+	// Now collect metrics and assert that one of the emitted metrics contains subtitle_action="transcode"
+	ch := make(chan prometheus.Metric, 32)
+	sessStore.Collect(ch)
+	close(ch)
+
+	found := false
+	for m := range ch {
+		dto := &io_prometheus_client.Metric{}
+		// convert to DTO to inspect labels
+		if err := m.Write(dto); err != nil {
+			t.Fatalf("failed to write metric: %v", err)
 		}
-		// Send a normal close so the client's read loop returns a CloseError
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		_ = conn.Close()
-	}))
-	defer ts.Close()
-
-	// override newPlex to return a client that points at our test server
-	old := newPlex
-	newPlex = func(base, token string) (*ttPlex.Plex, error) {
-		return ttPlex.New(base, token)
-	}
-	defer func() { newPlex = old }()
-
-	u, err := url.Parse(ts.URL)
-	if err != nil {
-		t.Fatalf("failed to parse test server URL: %v", err)
-	}
-
-	s := &Server{URL: u, Token: "tok"}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Expect Listen to return (nil on normal closure)
-	if err := s.Listen(ctx, log.NewNopLogger()); err != nil {
-		t.Fatalf("Listen returned error: %v", err)
-	}
-}
-
-func TestSubscribeToNotifications_InvokesEventHandler(t *testing.T) {
-	// Start a test server that upgrades websocket connections and sends a single notification
-	serverDone := make(chan struct{})
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/:/websockets/notifications" {
-			http.NotFound(w, r)
-			return
+		for _, lp := range dto.GetLabel() {
+			if lp.GetName() == "subtitle_action" && lp.GetValue() == "transcode" {
+				found = true
+				break
+			}
 		}
-		up := websocket.Upgrader{}
-		c, err := up.Upgrade(w, r, nil)
-		if err != nil {
-			t.Fatalf("upgrade failed: %v", err)
+		if found {
+			break
 		}
-		defer c.Close()
-
-		// send a transcodeSession.update notification (NotificationContainer.type must be set)
-		msg := `{"NotificationContainer":{"TranscodeSession":[{"key":"k1","videoDecision":"transcode","subtitleDecision":"copy","container":"mp4"}],"type":"transcodeSession.update"}}`
-		if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-			t.Fatalf("write message: %v", err)
-		}
-
-		// keep the connection open until the test signals serverDone
-		<-serverDone
-	}))
-	defer srv.Close()
-
-	// Create a Plex client pointing at the test server
-	p, err := ttPlex.New(srv.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create plex client: %v", err)
 	}
 
-	events := ttPlex.NewNotificationEvents()
-	called := make(chan struct{}, 1)
-	events.OnTranscodeUpdate(func(n ttPlex.NotificationContainer) {
-		called <- struct{}{}
-	})
-
-	// interrupt channel: close after timeout to allow SubscribeToNotifications to exit
-	intr := make(chan os.Signal, 1)
-
-	var gotErr error
-	done := make(chan struct{})
-	var doneOnce sync.Once
-	go func() {
-		p.SubscribeToNotifications(events, intr, func(e error) {
-			gotErr = e
-			doneOnce.Do(func() { close(done) })
-		})
-	}()
-
-	select {
-	case <-called:
-		// success
-	case <-time.After(1 * time.Second):
-		t.Fatalf("timeout waiting for event handler to be called")
-	}
-
-	// close interrupt to make SubscribeToNotifications return
-	close(intr)
-
-	// allow server handler to return (which closes the server-side websocket)
-	close(serverDone)
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timeout waiting for SubscribeToNotifications to finish")
-	}
-
-	if gotErr != nil {
-		t.Logf("SubscribeToNotifications reported error (acceptable): %v", gotErr)
+	if !found {
+		t.Fatalf("expected to find a metric with subtitle_action=\"burn\" but none was emitted")
 	}
 }

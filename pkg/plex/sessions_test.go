@@ -84,6 +84,62 @@ func TestCollectEmitsTranscodeTypeLabel(t *testing.T) {
 	}
 }
 
+func TestCollectEmitsSubtitleActionBurn(t *testing.T) {
+	s := &sessions{
+		sessions: map[string]session{},
+		server: &Server{
+			Name: "test-server",
+			ID:   "srv-1",
+		},
+	}
+
+	ss := session{}
+	ss.playStarted = time.Now().Add(-5 * time.Second)
+	ss.state = statePlaying
+	ss.resolvedLibraryName = "lib"
+	ss.resolvedLibraryID = "1"
+	ss.resolvedLibraryType = "movie"
+
+	ss.session = ttPlex.Metadata{
+		Media: []ttPlex.Media{{
+			Bitrate:         1000,
+			VideoResolution: "720p",
+			Part: []ttPlex.Part{{
+				Decision: "transcode",
+			}},
+		}},
+		Player: ttPlex.Player{Device: "dev", Product: "plex-player"},
+		User:   ttPlex.User{Title: "alice"},
+	}
+	ss.media = ttPlex.Metadata{Media: []ttPlex.Media{{VideoResolution: "1080p"}}}
+
+	// set subtitle action to burn and insert into sessions map
+	ss.subtitleAction = "burn"
+	sid := "session-sub-burn"
+	s.sessions[sid] = ss
+
+	ch := make(chan prometheus.Metric, 10)
+	s.Collect(ch)
+	close(ch)
+
+	found := false
+	for m := range ch {
+		var dtoMetric dto.Metric
+		if err := m.Write(&dtoMetric); err != nil {
+			t.Fatalf("failed to write metric: %v", err)
+		}
+		for _, lp := range dtoMetric.Label {
+			if lp.GetName() == "subtitle_action" && lp.GetValue() == "burn" {
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected collected metrics to include subtitle_action=burn label")
+	}
+}
+
 func TestLabelsFunction(t *testing.T) {
 	m := ttPlex.Metadata{Type: "episode", GrandparentTitle: "Show", ParentTitle: "S1", Title: "E1"}
 	title, season, episode := labels(m)
