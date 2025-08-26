@@ -12,6 +12,23 @@ import (
 	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
+// getContentTypeForLibrary returns a descriptive label for what type of items
+// are counted in each library type based on what the Plex API returns
+func getContentTypeForLibrary(libraryType string) string {
+	switch libraryType {
+	case "movie":
+		return "movies"
+	case "show":
+		return "shows"
+	case "artist":
+		return "artists"
+	case "photo":
+		return "photos"
+	default:
+		return "items"
+	}
+}
+
 type Server struct {
 	ID      string
 	Name    string
@@ -364,6 +381,9 @@ func (s *Server) Collect(ch chan<- prometheus.Metric) {
 			library.ID,
 		)
 
+		// Determine what type of content is being counted based on library type
+		contentType := getContentTypeForLibrary(library.Type)
+
 		ch <- metrics.LibraryItems(library.ItemsCount,
 			"plex",
 			library.Server.Name,
@@ -371,6 +391,7 @@ func (s *Server) Collect(ch chan<- prometheus.Metric) {
 			library.Type,
 			library.Name,
 			library.ID,
+			contentType,
 		)
 	}
 

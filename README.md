@@ -16,7 +16,6 @@
 
 Monitor your Plex Media Server with comprehensive real-time metrics including:
 
- 
 - **Advanced Transcode Analytics** - Detailed transcode type detection (video/audio/both) and subtitle handling
 - **Network & Bandwidth** - Real-time transmission tracking and bandwidth monitoring
 - **Real-time Session Monitoring** - Live WebSocket tracking of playback sessions and state changes
@@ -67,22 +66,18 @@ The exporter provides comprehensive real-time metrics about your Plex server via
 
 ### Server Metrics
 
- 
 - `host_cpu_util` - Host CPU utilization percentage
 - `host_mem_util` - Host memory utilization percentage
 - `server_info` - Server information with version, platform details
 
 ### Library Metrics
 
- 
 - `library_duration_total` - Total duration of library content in milliseconds
 - `library_storage_total` - Total storage size of library in bytes
- 
 
 ### Media Count Metrics
 
- 
-- `plex_library_items` - Number of items in each library section
+- `plex_library_items` - Number of items in each library section (movies for movie libraries, shows for TV libraries, artists for music libraries, photos for photo libraries). Includes a `content_type` label to clarify what type of items are being counted.
 - `plex_media_episodes` - Total number of TV episodes across all libraries
 - `plex_media_music` - Total number of music tracks across all libraries
 - `plex_media_movies` - Total number of movies across all libraries
@@ -91,7 +86,6 @@ The exporter provides comprehensive real-time metrics about your Plex server via
 
 ### Real-time Session/Playback Metrics
 
- 
 - `estimated_transmit_bytes_total` - Estimated bytes transmitted to clients
 - `play_seconds_total` - Total playback duration per session in seconds
 - `plays_total` - Total play counts with detailed labels (user, device, media, transcode info)
@@ -101,7 +95,6 @@ The exporter provides comprehensive real-time metrics about your Plex server via
 
 All session metrics include sophisticated transcode detection:
 
- 
 - **Stream Analysis**: Source vs destination resolution, bitrate, and codec comparison
 - **Subtitle Actions**: `burn`, `copy`, `none`, or `transcode` for subtitle handling
 - **Transcode Type**: `video`, `audio`, `both`, or `none` based on codec analysis
@@ -110,7 +103,6 @@ All session metrics include sophisticated transcode detection:
 
 All metrics include relevant labels for detailed filtering and grouping:
 
- 
 - **Library labels**: `library_type`, `library`, `library_id`
 - **Server labels**: `server_type`, `server`, `server_id`
 - **Session labels**: `media_type`, `title`, `child_title`, `grandchild_title`, `stream_type`, `stream_resolution`, `stream_file_resolution`, `stream_bitrate`, `device`, `device_type`, `user`, `session`, `transcode_type`, `subtitle_action`

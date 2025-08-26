@@ -18,6 +18,10 @@ var (
 		"library_id",   // Library unique id
 	)
 
+	libraryItemsLabels = append(append([]string(nil), libraryLabels...),
+		"content_type", // what type of items are being counted: movies, shows, artists, photos
+	)
+
 	playLabels = append(append([]string(nil), libraryLabels...),
 		"media_type",             // Movies, tv_shows, music, or live_tv
 		"title",                  // For tv shows this is the series title. For music this is the artist.
@@ -67,7 +71,7 @@ var (
 	MetricsLibraryItemsDesc = prometheus.NewDesc(
 		"plex_library_items",
 		"Number of items in a library section",
-		libraryLabels,
+		libraryItemsLabels,
 		nil,
 	)
 
@@ -163,14 +167,14 @@ func LibraryStorage(value int64,
 
 func LibraryItems(value int64,
 	serverType, serverName, serverID,
-	libraryType, libraryName, libraryID string,
+	libraryType, libraryName, libraryID, contentType string,
 ) prometheus.Metric {
 
 	return prometheus.MustNewConstMetric(MetricsLibraryItemsDesc,
 		prometheus.GaugeValue,
 		float64(value),
 		serverType, serverName, serverID,
-		libraryType, libraryName, libraryID,
+		libraryType, libraryName, libraryID, contentType,
 	)
 }
 
