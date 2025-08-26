@@ -88,9 +88,20 @@ func (s *sessions) pruneOldSessions() {
 	defer s.mtx.Unlock()
 
 	for k, v := range s.sessions {
+		// Remove stopped sessions that are older than the timeout
 		if v.state == stateStopped && time.Since(v.lastUpdate) > sessionTimeout {
 			delete(s.sessions, k)
 			delete(s.sessionTranscodeMap, k)
+			continue
+		}
+
+		// Remove orphaned transcode sessions (sessions with no session key and no meaningful data) more aggressively
+		// These are created when transcode notifications arrive for sessions that don't exist
+		// Remove them if they're older than 10 seconds to allow for brief race conditions
+		if v.session.SessionKey == "" && len(v.session.Media) == 0 &&
+			(v.lastUpdate.IsZero() || time.Since(v.lastUpdate) > 10*time.Second) {
+			delete(s.sessions, k)
+			continue
 		}
 	}
 }
@@ -310,6 +321,29 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 		}
 	}
 
+	// Check if the transcode session matches any of the transcode sessions embedded in active session media
+	for k, ss := range s.sessions {
+		// Skip sessions without proper session data (orphaned transcode entries)
+		if ss.session.SessionKey == "" || ss.session.User.Title == "" {
+			continue
+		}
+
+		if len(ss.session.Media) > 0 {
+			for _, media := range ss.session.Media {
+				for _, part := range media.Part {
+					if part.Key != "" && strings.Contains(part.Key, "/transcode/sessions/") {
+						partTranscodeID := extractTranscodeSessionID(part.Key)
+						if partTranscodeID == sessionID || partTranscodeID == extractTranscodeSessionID(originalSessionID) {
+							ss.transcodeType = ttype
+							s.sessions[k] = ss
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Enhanced transcode session matching: check if the websocket sessionID
 	// matches any transcode session keys embedded in the session data.
 	// This handles cases where websocket sends keys like "abc123" or "/transcode/sessions/abc123" but
@@ -359,6 +393,11 @@ func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 	// Strategy 1: Apply to any single transcoding session if there's only one
 	transcodingSessions := []string{}
 	for k, ss := range s.sessions {
+		// Skip orphaned transcode sessions (those with no session key and no meaningful data)
+		if ss.session.SessionKey == "" && len(ss.session.Media) == 0 {
+			continue
+		}
+
 		if len(ss.session.Media) > 0 && len(ss.session.Media[0].Part) > 0 {
 			if ss.session.Media[0].Part[0].Decision == "transcode" {
 				transcodingSessions = append(transcodingSessions, k)

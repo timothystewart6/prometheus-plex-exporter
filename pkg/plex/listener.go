@@ -295,13 +295,23 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 				l.activeSessions.mtx.Lock()
 				for _, k := range keys {
 					ss := l.activeSessions.sessions[k]
+					// Skip orphaned sessions (those with no session key and no meaningful data) from diagnostic output
+					if ss.session.SessionKey == "" && len(ss.session.Media) == 0 {
+						continue
+					}
 					user := ss.session.User.Title
 					player := ss.session.Player.Product
 					inner := ss.session.SessionKey
 					ssum = append(ssum, fmt.Sprintf("mapKey=%s sessionKey=%s user=%s player=%s", k, inner, user, player))
 				}
 				l.activeSessions.mtx.Unlock()
-				_ = level.Warn(l.log).Log("msg", "transcode update did not match any active session", "tsKey", ts.Key, "detectedKind", kind, "knownSessions", strings.Join(ssum, "; "))
+
+				// Only log warning if there are actual active sessions to show
+				if len(ssum) > 0 {
+					_ = level.Warn(l.log).Log("msg", "transcode update did not match any active session", "tsKey", ts.Key, "detectedKind", kind, "knownSessions", strings.Join(ssum, "; "))
+				} else {
+					_ = level.Debug(l.log).Log("msg", "transcode update for session not currently active", "tsKey", ts.Key, "detectedKind", kind)
+				}
 			} else {
 				_ = level.Warn(l.log).Log("msg", "transcode update did not match and activeSessions is nil", "tsKey", ts.Key, "detectedKind", kind)
 			}
