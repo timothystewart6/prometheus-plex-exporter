@@ -533,6 +533,13 @@ func (s *sessions) Collect(ch chan<- prometheus.Metric) {
 		if session.playStarted.IsZero() {
 			continue
 		}
+
+		// Skip orphaned sessions (those with no session key and no meaningful data)
+		// These can occur when transcode notifications arrive for sessions that don't exist
+		if session.session.SessionKey == "" && len(session.session.Media) == 0 {
+			continue
+		}
+
 		title, season, episode := labels(session.media)
 
 		// Prefer persisted resolved labels if available; fall back to
