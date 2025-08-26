@@ -7,7 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/prometheus/client_golang v1.23.0
 	github.com/prometheus/client_model v0.6.2
-	github.com/timothystewart6/go-plex-client v0.0.0-20250825035249-8dbfef214ba8
+	github.com/timothystewart6/go-plex-client v0.0.0-20250826024717-6134b01f4bde
 )
 
 require (
