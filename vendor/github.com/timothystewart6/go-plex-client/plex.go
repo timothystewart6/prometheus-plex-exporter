@@ -1050,6 +1050,33 @@ func (p *Plex) GetLibraries() (LibrarySections, error) {
 	return result, nil
 }
 
+// GetLibrariesWithCounts gets libraries and populates the Count field with actual item counts
+func (p *Plex) GetLibrariesWithCounts() (LibrarySections, error) {
+	// First get the basic library information
+	libraries, err := p.GetLibraries()
+	if err != nil {
+		return LibrarySections{}, err
+	}
+
+	// For each library, get the actual count by querying its content
+	for i := range libraries.MediaContainer.Directory {
+		dir := &libraries.MediaContainer.Directory[i]
+
+		// Query the library content to get the actual count
+		content, err := p.GetLibraryContent(dir.Key, "")
+		if err != nil {
+			// If we can't get the content, set count to -1 to indicate error
+			dir.Count = -1
+			continue
+		}
+
+		// Set the actual count from the MediaContainer size
+		dir.Count = content.MediaContainer.Size
+	}
+
+	return libraries, nil
+}
+
 // GetLibraryContent retrieve the content inside a library
 func (p *Plex) GetLibraryContent(sectionKey string, filter string) (SearchResults, error) {
 	query := fmt.Sprintf("%s/library/sections/%s/all%s", p.URL, sectionKey, filter)
