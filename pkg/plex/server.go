@@ -188,7 +188,7 @@ func (s *Server) Refresh() error {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
-	
+
 	// Reset musicTotal to 0 since we'll be counting tracks, not artists
 	musicTotal = 0
 	for _, lib := range newLibraries {
