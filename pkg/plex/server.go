@@ -158,7 +158,7 @@ func (s *Server) Refresh() error {
 	}
 
 	// Compute server-level totals for movies and episodes. Parallelize
-	// episode/music queries but accumulate into locals first.
+	// episode/music track queries but accumulate into locals first.
 	var moviesTotal int64
 	var episodesTotal int64
 	var musicTotal int64
@@ -178,6 +178,8 @@ func (s *Server) Refresh() error {
 		}
 	}
 
+	// Plex API media type parameters:
+	// 1 = movie, 2 = show, 3 = season, 4 = episode, 5 = artist, 6 = album, 7 = track, 8 = photoalbum, 9 = photo
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
@@ -205,7 +207,7 @@ func (s *Server) Refresh() error {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				path := "/library/sections/" + sectionID + "/all?type=10"
+				path := "/library/sections/" + sectionID + "/all?type=7"
 				if err := s.Client.Get(path, &results); err == nil {
 					mu.Lock()
 					musicTotal += int64(results.MediaContainer.Size)
