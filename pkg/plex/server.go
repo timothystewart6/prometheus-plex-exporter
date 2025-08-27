@@ -1,6 +1,7 @@
 package plex
 
 import (
+	"log"
 	"net/url"
 	"sort"
 	"sync"
@@ -187,6 +188,9 @@ func (s *Server) Refresh() error {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
+	
+	// Reset musicTotal to 0 since we'll be counting tracks, not artists
+	musicTotal = 0
 	for _, lib := range newLibraries {
 		if lib.Type == "show" {
 			wg.Add(1)
@@ -216,6 +220,9 @@ func (s *Server) Refresh() error {
 					mu.Lock()
 					musicTotal += int64(results.MediaContainer.Size)
 					mu.Unlock()
+				} else {
+					// Log the error to help debug the issue
+					log.Printf("Error fetching music tracks for section %s: %v", sectionID, err)
 				}
 			}(lib.ID)
 		}
