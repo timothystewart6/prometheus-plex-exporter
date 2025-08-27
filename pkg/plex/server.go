@@ -12,6 +12,10 @@ import (
 	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
+// Plex API type parameter mappings:
+// 1=movie, 2=show, 3=season, 4=episode, 5=artist, 6=album, 7=track, 8=photoalbum, 9=photo, 10=track
+// Note: Some Plex servers use type=10 for tracks instead of type=7
+
 // getContentTypeForLibrary returns a descriptive label for what type of items
 // are counted in each library type based on what the Plex API returns
 func getContentTypeForLibrary(libraryType string) string {
@@ -207,7 +211,7 @@ func (s *Server) Refresh() error {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				path := "/library/sections/" + sectionID + "/all?type=7"
+				path := "/library/sections/" + sectionID + "/all?type=10"
 				if err := s.Client.Get(path, &results); err == nil {
 					mu.Lock()
 					musicTotal += int64(results.MediaContainer.Size)
