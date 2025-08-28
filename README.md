@@ -62,13 +62,14 @@ services:
 
 ## Metrics
 
-## .env / Optional Environment Settings
+## Optional Environment Settings
 
 You can supply environment variables via your container runtime, `docker run -e VAR=...`, `docker-compose`, or with a `.env` file for local development. The exporter recognizes the following optional environment variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `LIBRARY_REFRESH_INTERVAL` | How often to re-query expensive per-library counts (music tracks, episode counts, and library items) in minutes. Must be an integer number of minutes. Defaults to `15` when unset. Set to `0` to disable caching and always re-query. | `15` |
+| `DEBUG` | Enable verbose debug logging. Set to `true` to turn on debug-level logs (useful for troubleshooting). Defaults to off. | `true` |
 
 Example `.env` file:
 
@@ -77,11 +78,18 @@ PLEX_SERVER=http://192.168.1.100:32400
 PLEX_TOKEN=abcd1234efgh5678
 # Refresh caches every 15 minutes (default)
 LIBRARY_REFRESH_INTERVAL=15
+# Enable debug logs
+DEBUG=true
 ```
 
 Notes:
 
 - `LIBRARY_REFRESH_INTERVAL` is intentionally minutes-only to avoid accidental short intervals. Set to `0` to disable caching and always re-query.
+- `DEBUG` enables verbose debug logging. When enabled the exporter will emit debug messages for library fetches, cache hits/skips and music/episode fetch details. The exporter still logs startup warnings and errors regardless of this flag.
+
+Startup note:
+
+- On startup the exporter performs an initial full refresh to populate library and media counts. The startup log will always show the effective `LibraryRefreshInterval` or that caching is disabled.
 - The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are unchanged and required for the exporter to connect to your Plex server.
 
 The exporter provides comprehensive real-time metrics about your Plex server via WebSocket monitoring:

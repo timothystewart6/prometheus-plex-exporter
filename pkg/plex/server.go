@@ -60,6 +60,15 @@ type Server struct {
 	// LibraryRefreshInterval controls how often we re-query expensive per-library
 	// counts (music tracks, episodes). If zero, defaults to 1h.
 	LibraryRefreshInterval time.Duration
+	// Debug enables verbose debug logging when true.
+	Debug bool
+}
+
+// debugf logs only when server debug is enabled.
+func (s *Server) debugf(format string, args ...interface{}) {
+	if s != nil && s.Debug {
+		log.Printf(format, args...)
+	}
 }
 
 type StatisticsBandwidth struct {
@@ -102,6 +111,11 @@ func NewServer(serverURL, token string) (*Server, error) {
 	} else {
 		// default to 15 minutes when not set
 		server.LibraryRefreshInterval = 15 * time.Minute
+	}
+
+	// Configure debug logging via DEBUG ("1" or "true")
+	if v := os.Getenv("DEBUG"); v == "1" || v == "true" {
+		server.Debug = true
 	}
 
 	// Log effective interval; if 0 then caching is disabled
@@ -200,16 +214,16 @@ func (s *Server) Refresh() error {
 
 				path := "/library/sections/" + lib.ID + "/all"
 				if usedCache {
-					log.Printf("Using cached items count for library %s (ID: %s): %d", lib.Name, lib.ID, lib.ItemsCount)
+					s.debugf("Using cached items count for library %s (ID: %s): %d", lib.Name, lib.ID, lib.ItemsCount)
 				} else {
-					log.Printf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
+					s.debugf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
 					if err := s.Client.Get(path, &results); err == nil {
 						lib.ItemsCount = int64(results.MediaContainer.Size)
 						if s.LibraryRefreshInterval > 0 {
 							lib.lastItemsCount = lib.ItemsCount
 							lib.lastItemsFetch = time.Now().Unix()
 						}
-						log.Printf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
+						s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
 					} else {
 						log.Printf("Error fetching items for library %s (ID: %s): %v", lib.Name, lib.ID, err)
 					}
@@ -250,7 +264,7 @@ func (s *Server) Refresh() error {
 
 	// Reset musicTotal to 0 since we'll be counting tracks, not artists
 	musicTotal = 0
-	log.Printf("Starting library processing for %d libraries; pre-parallel totals: movies=%d episodes=%d music=%d photos=%d other=%d", len(newLibraries), moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal)
+	s.debugf("Starting library processing for %d libraries; pre-parallel totals: movies=%d episodes=%d music=%d photos=%d other=%d", len(newLibraries), moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal)
 	for _, lib := range newLibraries {
 		if lib.Type == "show" {
 			wg.Add(1)
@@ -277,7 +291,7 @@ func (s *Server) Refresh() error {
 				}
 
 				if useCached {
-					log.Printf("Skipping episode fetch for section %s; cached within %s", sectionID, interval)
+					s.debugf("Skipping episode fetch for section %s; cached within %s", sectionID, interval)
 					s.mtx.Lock()
 					for _, l := range s.libraries {
 						if l.ID == sectionID {
@@ -290,7 +304,7 @@ func (s *Server) Refresh() error {
 					s.mtx.Unlock()
 				} else {
 					path := "/library/sections/" + sectionID + "/all?type=4"
-					log.Printf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
+					s.debugf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
 					if err := s.Client.Get(path, &results); err == nil {
 						mu.Lock()
 						episodesTotal += int64(results.MediaContainer.Size)
@@ -316,7 +330,7 @@ func (s *Server) Refresh() error {
 		}
 
 		if lib.Type == "music" || lib.Type == "artist" {
-			log.Printf("Found music library: %s (ID: %s, type: %s)", lib.Name, lib.ID, lib.Type)
+			s.debugf("Found music library: %s (ID: %s, type: %s)", lib.Name, lib.ID, lib.Type)
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(sectionID string) {
@@ -344,9 +358,9 @@ func (s *Server) Refresh() error {
 
 				if useCached {
 					if s.LibraryRefreshInterval > 0 {
-						log.Printf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
+						s.debugf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
 					} else {
-						log.Printf("Skipping music fetch for section %s; caching is disabled, but using last known value if present", sectionID)
+						s.debugf("Skipping music fetch for section %s; caching is disabled, but using last known value if present", sectionID)
 					}
 					// use the last successful exact track count if available,
 					// otherwise fall back to the unfiltered ItemsCount.
@@ -366,27 +380,27 @@ func (s *Server) Refresh() error {
 					// Prefer type=10 (some servers) then fallback to type=7
 					for _, trackType := range []string{"10", "7"} {
 						path := "/library/sections/" + sectionID + "/all?type=" + trackType
-						log.Printf("Fetching music tracks from path: %s", path)
+						s.debugf("Fetching music tracks from path: %s", path)
 						if err := s.Client.Get(path, &results); err == nil {
 							if results.MediaContainer.Size > 0 {
-								log.Printf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
+								s.debugf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
 								trackCount = int64(results.MediaContainer.Size)
 								// update library cache with successful type and timestamp
 								s.mtx.Lock()
 								for _, l := range s.libraries {
 									if l.ID == sectionID {
-												l.cachedTrackType = trackType
-												if s.LibraryRefreshInterval > 0 {
-													l.lastMusicFetch = time.Now().Unix()
-													l.lastMusicCount = int64(results.MediaContainer.Size)
-												}
+										l.cachedTrackType = trackType
+										if s.LibraryRefreshInterval > 0 {
+											l.lastMusicFetch = time.Now().Unix()
+											l.lastMusicCount = int64(results.MediaContainer.Size)
+										}
 										break
 									}
 								}
 								s.mtx.Unlock()
 								break
 							} else {
-								log.Printf("No tracks found using type=%s for section %s", trackType, sectionID)
+								s.debugf("No tracks found using type=%s for section %s", trackType, sectionID)
 							}
 						} else {
 							log.Printf("Error fetching music tracks using type=%s for section %s: %v", trackType, sectionID, err)
@@ -403,7 +417,7 @@ func (s *Server) Refresh() error {
 	wg.Wait()
 	close(sem)
 
-	log.Printf("Final music count: %d", musicTotal)
+	s.debugf("Final music count: %d", musicTotal)
 
 	// Update server state under lock.
 	s.mtx.Lock()
