@@ -1,0 +1,43 @@
+#!/bin/sh
+# Pre-commit hook: format staged Go files, run linter, run tests.
+# Enable with:
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/pre-commit
+
+set -eu
+
+echo "pre-commit: running gofmt on staged Go files"
+
+# Get list of staged Go files (Added, Copied, Modified)
+staged_go_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+if [ -n "$staged_go_files" ]; then
+  echo "$staged_go_files" | while IFS= read -r file; do
+    # Skip if file removed or not present on disk
+    if [ -f "$file" ]; then
+      gofmt -s -w "$file"
+      git add "$file"
+      echo "formatted $file"
+    fi
+  done
+else
+  echo "no staged Go files to format"
+fi
+
+echo "pre-commit: running linter"
+# Prefer golangci-lint if available, fallback to go vet
+if command -v golangci-lint >/dev/null 2>&1; then
+  golangci-lint run ./...
+else
+  echo "golangci-lint not found in PATH; running 'go vet' as fallback"
+  go vet ./...
+fi
+
+echo "pre-commit: running tests"
+if ! go test ./...; then
+  echo "pre-commit: tests failed. Aborting commit." >&2
+  exit 1
+fi
+
+echo "pre-commit: all checks passed"
+exit 0
