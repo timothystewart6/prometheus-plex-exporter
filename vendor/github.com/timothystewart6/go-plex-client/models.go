@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // FlexibleInt64 handles JSON values that may be numbers or quoted strings.
@@ -31,6 +33,9 @@ type Plex struct {
 	Headers          headers
 	HTTPClient       http.Client
 	DownloadClient   http.Client
+	// WebsocketDialer controls websocket connections created by SubscribeToNotifications.
+	// If nil, the package uses websocket.DefaultDialer.
+	WebsocketDialer *websocket.Dialer
 }
 
 // SearchResults a list of media returned when searching

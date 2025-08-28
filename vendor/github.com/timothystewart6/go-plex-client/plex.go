@@ -3,6 +3,7 @@ package plex
 // plex is a Plex Media Server and Plex.tv client
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
 var (
@@ -47,9 +49,56 @@ func defaultHeaders() headers {
 	}
 }
 
+// Option configures a Plex client during creation.
+type Option func(*Plex)
+
+// WithInsecureSkipVerify instructs the client to skip TLS certificate verification.
+// This is insecure and should be used only for testing or in trusted networks.
+func WithInsecureSkipVerify() Option {
+	return func(p *Plex) {
+		if p.HTTPClient.Transport == nil {
+			p.HTTPClient.Transport = &http.Transport{}
+		}
+
+		if t, ok := p.HTTPClient.Transport.(*http.Transport); ok {
+			// copy to avoid mutating shared transports
+			nt := t.Clone()
+			nt.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+			p.HTTPClient.Transport = nt
+		}
+
+		if p.DownloadClient.Transport == nil {
+			p.DownloadClient.Transport = &http.Transport{}
+		}
+
+		if dt, ok := p.DownloadClient.Transport.(*http.Transport); ok {
+			ndt := dt.Clone()
+			ndt.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+			p.DownloadClient.Transport = ndt
+		}
+
+		// Configure per-client websocket dialer so websocket connections honor
+		// the same TLS settings. Clone the default dialer if present.
+		if websocket.DefaultDialer != nil {
+			d := *websocket.DefaultDialer
+			if d.TLSClientConfig == nil {
+				d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+			} else {
+				// clone existing TLS config and set InsecureSkipVerify
+				cfg := *d.TLSClientConfig
+				cfg.InsecureSkipVerify = true
+				d.TLSClientConfig = &cfg
+			}
+			p.WebsocketDialer = &d
+		} else {
+			p.WebsocketDialer = &websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		}
+	}
+}
+
 // New creates a new plex instance that is required to
 // to make requests to your Plex Media Server
-func New(baseURL, token string) (*Plex, error) {
+func New(baseURL, token string, opts ...Option) (*Plex, error) {
 	var p Plex
 
 	// allow empty url so caller can use GetServers() to set the server url later
@@ -64,6 +113,16 @@ func New(baseURL, token string) (*Plex, error) {
 
 	p.DownloadClient = http.Client{}
 
+	// Honor environment variable to enable insecure TLS behavior when set to
+	// SKIP_TLS_VERIFICATION=1 or SKIP_TLS_VERIFICATION=true (case-insensitive).
+	if v := os.Getenv("SKIP_TLS_VERIFICATION"); v != "" {
+		lower := strings.ToLower(v)
+		if lower == "1" || lower == "true" {
+			// prepend the option so callers can override by passing explicit opts
+			opts = append([]Option{WithInsecureSkipVerify()}, opts...)
+		}
+	}
+
 	p.Headers = defaultHeaders()
 	// id, err := uuid.NewRandom()
 
@@ -74,6 +133,13 @@ func New(baseURL, token string) (*Plex, error) {
 	// p.ClientIdentifier = id.String()
 	p.ClientIdentifier = p.Headers.ClientIdentifier
 	p.Headers.ClientIdentifier = p.ClientIdentifier
+
+	// Apply functional options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&p)
+		}
+	}
 
 	// has url and token
 	if baseURL != "" && token != "" {

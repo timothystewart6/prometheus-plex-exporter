@@ -15,6 +15,18 @@ plexConnection, err := plex.New("http://192.168.1.2:32400", "myPlexToken")
 
 // Test your connection to your Plex server
 result, err := plexConnection.Test()
+Configuration
+
+You can opt into skipping TLS certificate verification when creating a client using the functional
+option `WithInsecureSkipVerify()`. This is insecure and should only be used for testing or in
+trusted networks. As a convenience, set the environment variable `SKIP_TLS_VERIFICATION=1` or
+`SKIP_TLS_VERIFICATION=true` to enable the same behavior without changing code.
+
+Example:
+
+```go
+client, _ := plex.New("https://my-plex", "token", plex.WithInsecureSkipVerify())
+```
 
 // Search for media in your plex server
 results, err := plexConnection.Search("The Walking Dead")

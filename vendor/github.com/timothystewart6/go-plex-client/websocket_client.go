@@ -318,7 +318,12 @@ func (p *Plex) SubscribeToNotifications(events *NotificationEvents, interrupt <-
 		"X-Plex-Token": []string{p.Token},
 	}
 
-	c, _, err := websocket.DefaultDialer.Dial(websocketURL.String(), headers)
+	dialer := websocket.DefaultDialer
+	if p.WebsocketDialer != nil {
+		dialer = p.WebsocketDialer
+	}
+
+	c, _, err := dialer.Dial(websocketURL.String(), headers)
 
 	if err != nil {
 		fn(err)
