@@ -29,6 +29,7 @@ func NewClient(serverURL, token string) (*Client, error) {
 	// to "1" or "true".
 	httpClient := http.Client{}
 	if v := os.Getenv("SKIP_TLS_VERIFICATION"); v == "1" || v == "true" {
+		// nolint:gosec // InsecureSkipVerify is explicit and controlled by SKIP_TLS_VERIFICATION env var for testing/trusted networks
 		httpClient.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}

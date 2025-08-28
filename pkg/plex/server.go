@@ -1,8 +1,9 @@
 package plex
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/url"
 	"os"
 	"sort"
@@ -160,9 +161,12 @@ func NewServer(serverURL, token string) (*Server, error) {
 	// Schedule the full refresh after 15s + small jitter.
 	go func() {
 		delaySec := startupFullRefreshDelaySeconds
+		// Use crypto/rand for jitter to satisfy gosec's recommendation
 		jitter := 0
 		if startupFullRefreshJitterMax > 0 {
-			jitter = rand.Intn(startupFullRefreshJitterMax)
+			if n, err := rand.Int(rand.Reader, big.NewInt(int64(startupFullRefreshJitterMax))); err == nil {
+				jitter = int(n.Int64())
+			}
 		}
 		time.Sleep(time.Duration(delaySec+jitter) * time.Second)
 
@@ -367,6 +371,7 @@ func (s *Server) RefreshLight() error {
 // computeLibraryCounts performs the expensive per-library counting (episodes,
 // music tracks). It mirrors the logic previously embedded in Refresh() and is
 // intended to be invoked in background or during full refreshes.
+// nolint:gocyclo // function remains complex; consider refactor in a follow-up
 func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal int64) {
 	// Tally straightforward items first
 	for _, lib := range newLibraries {

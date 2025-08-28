@@ -206,6 +206,7 @@ func (l *plexListener) onTimelineHandler(c plex.NotificationContainer) {
 // contain customer-identifying information. Tests and documentation intentionally
 // use synthetic keys that are similar in shape to real data to exercise
 // matching logic without exposing production identifiers.
+// nolint:gocyclo // complexity tolerated for now; can be refactored later
 func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 	if len(c.TranscodeSession) == 0 {
 		return
@@ -218,11 +219,12 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 		subtitle := "none"
 		sd := strings.ToLower(strings.TrimSpace(ts.SubtitleDecision))
 		if sd != "" {
-			if sd == "burn" || sd == "burn-in" {
+			switch sd {
+			case "burn", "burn-in":
 				subtitle = "burn"
-			} else if sd == "copy" || sd == "copying" {
+			case "copy", "copying":
 				subtitle = "copy"
-			} else if sd == "transcode" || sd == "transcoding" {
+			case "transcode", "transcoding":
 				// Plex may report subtitleDecision as "transcode" when the
 				// subtitle track is being converted/transcoded during playback.
 				// Preserve this as its own action so metrics can distinguish
@@ -337,11 +339,12 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 					subFromAPI := ""
 					if strings.TrimSpace(t.SubtitleDecision) != "" {
 						sdec := strings.ToLower(strings.TrimSpace(t.SubtitleDecision))
-						if sdec == "burn" || sdec == "burn-in" {
+						switch sdec {
+						case "burn", "burn-in":
 							subFromAPI = "burn"
-						} else if sdec == "copy" || sdec == "copying" {
+						case "copy", "copying":
 							subFromAPI = "copy"
-						} else if sdec == "transcode" || sdec == "transcoding" {
+						case "transcode", "transcoding":
 							// Preserve API-reported "transcode" as its own
 							// subtitle action so callers can distinguish it from
 							// an explicit burn.
@@ -428,7 +431,9 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		session := getSessionByID(sessions, n.SessionKey)
 		if session == nil {
 			for attempt := 1; attempt <= SessionLookupMaxRetries && session == nil; attempt++ {
-				time.Sleep(SessionLookupBaseDelay * time.Duration(1<<uint(attempt-1)))
+				// shift a duration to compute exponential backoff without int->uint conversion
+				backoff := SessionLookupBaseDelay * (time.Duration(1) << (attempt - 1))
+				time.Sleep(backoff)
 				if s2, err := l.conn.GetSessions(); err == nil {
 					session = getSessionByID(s2, n.SessionKey)
 				} else {
@@ -445,16 +450,17 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		// Fetch metadata with retries in case the server hasn't populated it yet.
 		var metadata plex.MediaMetadata
 		var metaErr error
-		for attempt := 1; attempt <= MetadataMaxRetries; attempt++ {
-			metadata, metaErr = l.conn.GetMetadata(n.RatingKey)
-			if metaErr == nil && len(metadata.MediaContainer.Metadata) > 0 {
-				break
+			for attempt := 1; attempt <= MetadataMaxRetries; attempt++ {
+				metadata, metaErr = l.conn.GetMetadata(n.RatingKey)
+				if metaErr == nil && len(metadata.MediaContainer.Metadata) > 0 {
+					break
+				}
+				// if this was the last attempt break and we'll log below
+				if attempt < MetadataMaxRetries {
+					backoff := MetadataBaseDelay * (time.Duration(1) << (attempt - 1))
+					time.Sleep(backoff)
+				}
 			}
-			// if this was the last attempt break and we'll log below
-			if attempt < MetadataMaxRetries {
-				time.Sleep(MetadataBaseDelay * time.Duration(1<<uint(attempt-1)))
-			}
-		}
 
 		if metaErr != nil {
 			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification after retries, skipping", "RatingKey", n.RatingKey, "err", metaErr)

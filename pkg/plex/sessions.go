@@ -247,6 +247,7 @@ func (s *sessions) TrySetSubtitleAction(sessionID, action string) bool {
 // TrySetTranscodeType behaves like SetTranscodeType but returns true if a
 // session was found and updated. This allows callers to detect no-match and
 // emit additional debug information without duplicating matching logic.
+// nolint:gocyclo // complexity acknowledged; refactor later if needed
 func (s *sessions) TrySetTranscodeType(sessionID, ttype string) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()

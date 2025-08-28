@@ -41,17 +41,18 @@ func maskToken(t string) string {
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	serverAddress := os.Getenv("PLEX_SERVER")
 	if serverAddress == "" {
 		_ = level.Error(log).Log("msg", "PLEX_SERVER environment variable must be specified")
+		cancel()
 		os.Exit(1)
 	}
 
 	plexToken := os.Getenv("PLEX_TOKEN")
 	if plexToken == "" {
 		_ = level.Error(log).Log("msg", "PLEX_TOKEN environment variable must be specified")
+		cancel()
 		os.Exit(1)
 	}
 
@@ -73,7 +74,7 @@ func main() {
 	if libRefresh == "" {
 		libRefresh = "15 (minutes, default; 0 = disable caching)"
 	} else {
-		libRefresh = libRefresh + " (minutes; 0 = disable caching)"
+		libRefresh += " (minutes; 0 = disable caching)"
 	}
 	debugFlag := os.Getenv("DEBUG")
 	if debugFlag == "" {
@@ -129,10 +130,12 @@ func main() {
 
 	_ = level.Debug(log).Log("msg", "shutting down metrics server")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer shutdownCancel()
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
 		_ = level.Error(log).Log("msg", "cannot gracefully shutdown metrics server", "error", err)
 	}
 
+	// ensure shutdown cancel is called before exiting so any resources are
+	// released; avoid relying on deferred calls that won't run after os.Exit
+	shutdownCancel()
 	os.Exit(exitCode)
 }

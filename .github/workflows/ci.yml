@@ -2,31 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-
-permissions:
-  contents: read
+    branches: [ main ]
 
 jobs:
-  test:
-    name: Unit tests
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.23.0
-          cache: false
-      - run: go test -v -mod vendor ./...
-        env:
-          CGO_ENABLED: "0"
+          go-version: '1.23'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.59.0
+          args: run ./...
+
+      - name: Run unit tests
+        run: |
+          go test -v -mod vendor ./...
+
       - name: Run vendor package tests
         run: |
           # Run tests that live in the vendor directory. These validate fixes in the vendored client.
           go test -v ./vendor/...
-        env:
-          CGO_ENABLED: "0"
 
   build:
     runs-on: ubuntu-latest
@@ -45,17 +50,18 @@ jobs:
           - goos: windows
             goarch: amd64
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
-      with:
-        go-version: 1.23.0
-        cache: false
-    - run: go build -mod vendor -o ./bin/prometheus-plex-exporter ./cmd/prometheus-plex-exporter
-      env:
-        CGO_ENABLED: "0"
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-    - uses: actions/upload-artifact@v4
-      with:
-        name: prometheus-plex-exporter-${{ matrix.goos }}-${{ matrix.goarch }}
-        path: ./bin
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+      - name: Build
+        run: |
+          go build -mod vendor -o ./bin/prometheus-plex-exporter ./cmd/prometheus-plex-exporter
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-plex-exporter-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ./bin
