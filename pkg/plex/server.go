@@ -2,6 +2,7 @@ package plex
 
 import (
 	"fmt"
+	"math/rand"
 	"net/url"
 	"os"
 	"sort"
@@ -65,6 +66,11 @@ type Server struct {
 	LibraryRefreshInterval time.Duration
 	// Debug enables verbose debug logging when true.
 	Debug bool
+
+	// fullRefreshDone is closed once the initial background full refresh
+	// (deferred at startup) completes. Tests may wait on this to observe
+	// when the heavy startup work has finished.
+	fullRefreshDone chan struct{}
 }
 
 // pkg-level logger used for structured logs within this package. Tests and
@@ -78,6 +84,13 @@ func (s *Server) debugf(format string, args ...interface{}) {
 		_ = level.Debug(pkgLog).Log("msg", fmt.Sprintf(format, args...))
 	}
 }
+
+// Controls for startup deferred full refresh. Defaults are production
+// values; tests in this package may override them to avoid long sleeps.
+var (
+	startupFullRefreshDelaySeconds = 15
+	startupFullRefreshJitterMax    = 5
+)
 
 type StatisticsBandwidth struct {
 	At    int   `json:"at"`
@@ -133,15 +146,47 @@ func NewServer(serverURL, token string) (*Server, error) {
 		_ = level.Info(pkgLog).Log("msg", "Library refresh interval set", "minutes", int(server.LibraryRefreshInterval.Minutes()))
 	}
 
-	err = server.Refresh()
-	if err != nil {
+	// Perform a fast, lightweight refresh at startup to populate basic
+	// server and library metadata without running expensive per-library
+	// item counts. Defer the expensive full refresh to run in the
+	// background after a short delay to reduce startup memory/CPU spikes.
+	if err := server.RefreshLight(); err != nil {
 		return nil, err
 	}
+
+	// Channel closed when the initial background full refresh completes.
+	server.fullRefreshDone = make(chan struct{})
+
+	// Schedule the full refresh after 15s + small jitter.
+	go func() {
+		delaySec := startupFullRefreshDelaySeconds
+		jitter := 0
+		if startupFullRefreshJitterMax > 0 {
+			jitter = rand.Intn(startupFullRefreshJitterMax)
+		}
+		time.Sleep(time.Duration(delaySec+jitter) * time.Second)
+
+		_ = level.Info(pkgLog).Log("msg", "Starting background full library refresh")
+		if err := server.Refresh(); err != nil {
+			_ = level.Error(pkgLog).Log("msg", "background full refresh failed", "err", err)
+		} else {
+			_ = level.Info(pkgLog).Log("msg", "background full library refresh completed")
+		}
+		close(server.fullRefreshDone)
+	}()
 
 	ticker := time.NewTicker(time.Second * 5)
 	go func() {
 		for range ticker.C {
-			_ = server.Refresh()
+			// Before the first full refresh completes, only run the
+			// lightweight refresh to avoid heavy work on the hot
+			// path. After that, perform the full refresh periodically.
+			select {
+			case <-server.fullRefreshDone:
+				_ = server.Refresh()
+			default:
+				_ = server.RefreshLight()
+			}
 		}
 	}()
 
@@ -149,9 +194,93 @@ func NewServer(serverURL, token string) (*Server, error) {
 }
 
 func (s *Server) Refresh() error {
-	// Avoid holding s.mtx across network calls to prevent blocking the
-	// metrics scrape path. Build the refreshed state locally then copy it
-	// into the server struct under lock.
+	// Use RefreshLight to populate basic metadata and libraries, then
+	// perform the expensive per-library counts and update totals.
+	if err := s.RefreshLight(); err != nil {
+		return err
+	}
+
+	// copy libraries reference under lock to avoid races with concurrent updates
+	s.mtx.Lock()
+	libs := make([]*Library, len(s.libraries))
+	copy(libs, s.libraries)
+	s.mtx.Unlock()
+
+	// Ensure each library has a current ItemsCount (this was part of the
+	// original full Refresh). We fetch per-library `/all` when cache is
+	// absent or expired.
+	for _, lib := range libs {
+		usedCache := false
+		if s.LibraryRefreshInterval > 0 {
+			interval := s.LibraryRefreshInterval
+			s.mtx.Lock()
+			for _, old := range s.libraries {
+				if old.ID == lib.ID {
+					if old.lastItemsFetch != 0 && time.Now().Unix()-old.lastItemsFetch < int64(interval.Seconds()) {
+						lib.ItemsCount = old.lastItemsCount
+						lib.lastItemsCount = old.lastItemsCount
+						lib.lastItemsFetch = old.lastItemsFetch
+						usedCache = true
+					}
+					break
+				}
+			}
+			s.mtx.Unlock()
+		}
+
+		if !usedCache {
+			var results ttPlex.SearchResults
+			path := "/library/sections/" + lib.ID + "/all"
+			s.debugf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
+			if err := s.Client.Get(path, &results); err == nil {
+				lib.ItemsCount = int64(results.MediaContainer.Size)
+				if s.LibraryRefreshInterval > 0 {
+					// update server cache entry
+					s.mtx.Lock()
+					for _, l := range s.libraries {
+						if l.ID == lib.ID {
+							l.lastItemsCount = lib.ItemsCount
+							l.lastItemsFetch = time.Now().Unix()
+							break
+						}
+					}
+					s.mtx.Unlock()
+				}
+				s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
+			} else {
+				_ = level.Error(pkgLog).Log("msg", "Error fetching items for library", "library", lib.Name, "id", lib.ID, "err", err)
+			}
+		}
+	}
+
+	moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal := s.computeLibraryCounts(libs)
+
+	// Update server state under lock with computed totals
+	s.mtx.Lock()
+	s.MovieCount = moviesTotal
+	s.EpisodeCount = episodesTotal
+	s.MusicCount = musicTotal
+	s.PhotoCount = photosTotal
+	s.OtherVideoCount = otherVideosTotal
+	s.mtx.Unlock()
+
+	if err := s.refreshServerInfo(); err != nil {
+		return err
+	}
+	if err := s.refreshResources(); err != nil {
+		return err
+	}
+	if err := s.refreshBandwidth(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RefreshLight performs a minimal refresh that populates server metadata and
+// the basic library list (ID, name, type, duration, storage) without
+// performing expensive per-library counts like episode or track totals.
+func (s *Server) RefreshLight() error {
 	container := struct {
 		MediaContainer struct {
 			FriendlyName      string `json:"friendlyName"`
@@ -172,11 +301,11 @@ func (s *Server) Refresh() error {
 			} `json:"MediaProvider"`
 		} `json:"MediaContainer"`
 	}{}
-	err := s.Client.Get("/media/providers?includeStorage=1", &container)
-	if err != nil {
+
+	if err := s.Client.Get("/media/providers?includeStorage=1", &container); err != nil {
 		return err
 	}
-	// Build new library list and totals without holding the server lock.
+
 	var newLibraries []*Library
 	for _, provider := range container.MediaContainer.MediaProviders {
 		if provider.Identifier != "com.plexapp.plugins.library" {
@@ -198,11 +327,7 @@ func (s *Server) Refresh() error {
 					StorageTotal:  directory.StorageTotal,
 					Server:        s,
 				}
-
-				var results ttPlex.SearchResults
-				// Check existing server cache for recent items count to avoid the expensive call.
-				// If LibraryRefreshInterval == 0 then caching is disabled and we always fetch.
-				usedCache := false
+				// Try to reuse cached items count if available and fresh
 				if s.LibraryRefreshInterval > 0 {
 					interval := s.LibraryRefreshInterval
 					s.mtx.Lock()
@@ -212,7 +337,6 @@ func (s *Server) Refresh() error {
 								lib.ItemsCount = old.lastItemsCount
 								lib.lastItemsCount = old.lastItemsCount
 								lib.lastItemsFetch = old.lastItemsFetch
-								usedCache = true
 							}
 							break
 						}
@@ -220,47 +344,36 @@ func (s *Server) Refresh() error {
 					s.mtx.Unlock()
 				}
 
-				path := "/library/sections/" + lib.ID + "/all"
-				if usedCache {
-					// Include a human-friendly content type in the log so it's
-					// clear whether the cached count represents movies, artists,
-					// photos, etc. This avoids confusion when later we fetch
-					// filtered counts (e.g. music tracks) and they differ.
-					contentType := getContentTypeForLibrary(lib.Type)
-					s.debugf("Using cached items count for library %s (ID: %s, content_type=%s): %d", lib.Name, lib.ID, contentType, lib.ItemsCount)
-				} else {
-					s.debugf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
-					if err := s.Client.Get(path, &results); err == nil {
-						lib.ItemsCount = int64(results.MediaContainer.Size)
-						if s.LibraryRefreshInterval > 0 {
-							lib.lastItemsCount = lib.ItemsCount
-							lib.lastItemsFetch = time.Now().Unix()
-						}
-						s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
-					} else {
-						_ = level.Error(pkgLog).Log("msg", "Error fetching items for library", "library", lib.Name, "id", lib.ID, "err", err)
-					}
-				}
-
 				newLibraries = append(newLibraries, lib)
 			}
 		}
 	}
 
-	// Compute server-level totals for movies and episodes. Parallelize
-	// episode/music track queries but accumulate into locals first.
-	var moviesTotal int64
-	var episodesTotal int64
-	var musicTotal int64
-	var photosTotal int64
-	var otherVideosTotal int64
+	// Update server metadata and libraries atomically.
+	s.mtx.Lock()
+	s.ID = container.MediaContainer.MachineIdentifier
+	s.Name = container.MediaContainer.FriendlyName
+	s.Version = container.MediaContainer.Version
+	s.libraries = newLibraries
+	s.mtx.Unlock()
 
+	// Refresh light-weight server info and resources (best effort)
+	_ = s.refreshServerInfo()
+	_ = s.refreshResources()
+
+	return nil
+}
+
+// computeLibraryCounts performs the expensive per-library counting (episodes,
+// music tracks). It mirrors the logic previously embedded in Refresh() and is
+// intended to be invoked in background or during full refreshes.
+func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal int64) {
+	// Tally straightforward items first
 	for _, lib := range newLibraries {
 		switch lib.Type {
 		case "movie":
 			moviesTotal += lib.ItemsCount
 		case "music", "artist":
-			// Some Plex servers report music libraries as "artist" rather than "music"
 			musicTotal += lib.ItemsCount
 		case "photo":
 			photosTotal += lib.ItemsCount
@@ -269,15 +382,13 @@ func (s *Server) Refresh() error {
 		}
 	}
 
-	// Plex API media type parameters:
-	// 1 = movie, 2 = show, 3 = season, 4 = episode, 5 = artist, 6 = album, 7 = track, 8 = photoalbum, 9 = photo
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
 
-	// Reset musicTotal to 0 since we'll be counting tracks, not artists
+	// Reset musicTotal since we'll compute exact track counts
 	musicTotal = 0
-	s.debugf("Starting library processing for %d libraries; pre-parallel totals: movies=%d episodes=%d music=%d photos=%d other=%d", len(newLibraries), moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal)
+
 	for _, lib := range newLibraries {
 		if lib.Type == "show" {
 			wg.Add(1)
@@ -286,8 +397,8 @@ func (s *Server) Refresh() error {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				// Check library cache to decide whether to skip fetching. If LibraryRefreshInterval == 0
-				// caching is disabled and we always fetch.
+
+				// Check cache
 				useCached := false
 				interval := s.LibraryRefreshInterval
 				if s.LibraryRefreshInterval > 0 {
@@ -304,7 +415,6 @@ func (s *Server) Refresh() error {
 				}
 
 				if useCached {
-					s.debugf("Skipping episode fetch for section %s; cached within %s", sectionID, interval)
 					s.mtx.Lock()
 					for _, l := range s.libraries {
 						if l.ID == sectionID {
@@ -317,13 +427,11 @@ func (s *Server) Refresh() error {
 					s.mtx.Unlock()
 				} else {
 					path := "/library/sections/" + sectionID + "/all?type=4"
-					s.debugf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
 					if err := s.Client.Get(path, &results); err == nil {
 						mu.Lock()
 						episodesTotal += int64(results.MediaContainer.Size)
 						mu.Unlock()
 
-						// update library cache only when caching enabled
 						if s.LibraryRefreshInterval > 0 {
 							s.mtx.Lock()
 							for _, l := range s.libraries {
@@ -343,7 +451,6 @@ func (s *Server) Refresh() error {
 		}
 
 		if lib.Type == "music" || lib.Type == "artist" {
-			s.debugf("Found music library: %s (ID: %s, type: %s)", lib.Name, lib.ID, lib.Type)
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(sectionID string) {
@@ -352,12 +459,10 @@ func (s *Server) Refresh() error {
 				var results ttPlex.SearchResults
 				var trackCount int64
 
-				// Check cache: if LibraryRefreshInterval == 0 caching is disabled.
 				interval := s.LibraryRefreshInterval
 				useCached := false
 				if s.LibraryRefreshInterval > 0 {
 					s.mtx.Lock()
-					// find library in s.libraries and inspect its cache fields
 					for _, l := range s.libraries {
 						if l.ID == sectionID {
 							if l.lastMusicFetch != 0 && time.Now().Unix()-l.lastMusicFetch < int64(interval.Seconds()) {
@@ -370,41 +475,24 @@ func (s *Server) Refresh() error {
 				}
 
 				if useCached {
-					if s.LibraryRefreshInterval > 0 {
-						s.debugf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
-					} else {
-						s.debugf("Skipping music fetch for section %s; caching is disabled, but using last known value if present", sectionID)
-					}
-					// use the last successful exact track count if available,
-					// otherwise fall back to the unfiltered ItemsCount. Include
-					// the cached_type in logs so operators know whether the
-					// cached count represents tracks (type=7/10) or an
-					// unfiltered items count (e.g. artists).
 					s.mtx.Lock()
 					for _, l := range s.libraries {
 						if l.ID == sectionID {
 							if l.lastMusicCount != 0 {
 								trackCount = l.lastMusicCount
-								s.debugf("Using cached music count for section %s; cached_type=%s count=%d", sectionID, l.cachedTrackType, trackCount)
 							} else {
 								trackCount = l.ItemsCount
-								contentType := getContentTypeForLibrary(l.Type)
-								s.debugf("Using cached items count for section %s; cached_content_type=%s count=%d", sectionID, contentType, trackCount)
 							}
 							break
 						}
 					}
 					s.mtx.Unlock()
 				} else {
-					// Prefer type=10 (some servers) then fallback to type=7
 					for _, trackType := range []string{"10", "7"} {
 						path := "/library/sections/" + sectionID + "/all?type=" + trackType
-						s.debugf("Fetching music tracks from path: %s", path)
 						if err := s.Client.Get(path, &results); err == nil {
 							if results.MediaContainer.Size > 0 {
-								s.debugf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
 								trackCount = int64(results.MediaContainer.Size)
-								// update library cache with successful type and timestamp
 								s.mtx.Lock()
 								for _, l := range s.libraries {
 									if l.ID == sectionID {
@@ -418,8 +506,6 @@ func (s *Server) Refresh() error {
 								}
 								s.mtx.Unlock()
 								break
-							} else {
-								s.debugf("No tracks found using type=%s for section %s", trackType, sectionID)
 							}
 						} else {
 							_ = level.Error(pkgLog).Log("msg", "Error fetching music tracks", "type", trackType, "section", sectionID, "err", err)
@@ -433,35 +519,11 @@ func (s *Server) Refresh() error {
 			}(lib.ID)
 		}
 	}
+
 	wg.Wait()
 	close(sem)
 
-	s.debugf("Final music count: %d", musicTotal)
-
-	// Update server state under lock.
-	s.mtx.Lock()
-	s.ID = container.MediaContainer.MachineIdentifier
-	s.Name = container.MediaContainer.FriendlyName
-	s.Version = container.MediaContainer.Version
-	s.libraries = newLibraries
-	s.MovieCount = moviesTotal
-	s.EpisodeCount = episodesTotal
-	s.MusicCount = musicTotal
-	s.PhotoCount = photosTotal
-	s.OtherVideoCount = otherVideosTotal
-	s.mtx.Unlock()
-
-	if err := s.refreshServerInfo(); err != nil {
-		return err
-	}
-	if err := s.refreshResources(); err != nil {
-		return err
-	}
-	if err := s.refreshBandwidth(); err != nil {
-		return err
-	}
-
-	return nil
+	return
 }
 
 func (s *Server) refreshServerInfo() error {

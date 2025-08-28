@@ -78,8 +78,14 @@ TZ=America/Chicago
 
 Startup note:
 
-- On startup the exporter performs an initial full refresh to populate library and media counts. The startup log will always show the effective `LibraryRefreshInterval` or that caching is disabled.
-- The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are required for the exporter to connect to your Plex server.
+- On startup the exporter performs a fast, lightweight metadata refresh to discover server and library sections and reduce startup latency and memory use. The expensive per-library full refresh (which computes episode counts, exact music track counts, and full library item lists) is deferred and runs in the background after a short delay. The startup log will always show the effective `LibraryRefreshInterval` or that caching is disabled.
+- The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are required for the exporter to connect to your Plex server. Note: unit tests in this repository perform a synchronous full refresh so counts are populated deterministically during tests; production behavior defers the heavy work.
+
+Library refresh timing (production)
+
+- The exporter defers the expensive per-library full refresh for 15 seconds after startup (plus a small jitter) and performs a fast, lightweight discovery immediately. This reduces peak memory and server load during startup. The 15s startup delay is a fixed behavior in the binary (not exposed as an environment variable).
+
+Recommendation: Keep the default deferred behavior (15s delay) in production to avoid simultaneous heavy queries and lower peak memory usage. If you're running many exporter instances against one Plex server, consider staggering startups.
 
 The exporter provides comprehensive real-time metrics about your Plex server via WebSocket monitoring:
 
