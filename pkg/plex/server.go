@@ -153,8 +153,12 @@ func (s *Server) Refresh() error {
 
 				var results ttPlex.SearchResults
 				path := "/library/sections/" + lib.ID + "/all"
+				log.Printf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
 				if err := s.Client.Get(path, &results); err == nil {
 					lib.ItemsCount = int64(results.MediaContainer.Size)
+					log.Printf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
+				} else {
+					log.Printf("Error fetching items for library %s (ID: %s): %v", lib.Name, lib.ID, err)
 				}
 
 				newLibraries = append(newLibraries, lib)
@@ -191,6 +195,7 @@ func (s *Server) Refresh() error {
 
 	// Reset musicTotal to 0 since we'll be counting tracks, not artists
 	musicTotal = 0
+	log.Printf("Starting library processing for %d libraries; pre-parallel totals: movies=%d episodes=%d music=%d photos=%d other=%d", len(newLibraries), moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal)
 	for _, lib := range newLibraries {
 		if lib.Type == "show" {
 			wg.Add(1)
@@ -200,35 +205,54 @@ func (s *Server) Refresh() error {
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
 				path := "/library/sections/" + sectionID + "/all?type=4"
+				log.Printf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
 				if err := s.Client.Get(path, &results); err == nil {
 					mu.Lock()
 					episodesTotal += int64(results.MediaContainer.Size)
 					mu.Unlock()
+				} else {
+					log.Printf("Error fetching episodes for section %s: %v", sectionID, err)
 				}
 			}(lib.ID)
 		}
 
 		if lib.Type == "music" {
+			log.Printf("Found music library: %s (ID: %s)", lib.Name, lib.ID)
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(sectionID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				path := "/library/sections/" + sectionID + "/all?type=10"
-				if err := s.Client.Get(path, &results); err == nil {
-					mu.Lock()
-					musicTotal += int64(results.MediaContainer.Size)
-					mu.Unlock()
-				} else {
-					// Log the error to help debug the issue
-					log.Printf("Error fetching music tracks for section %s: %v", sectionID, err)
+				var trackCount int64
+
+				// Try both type=7 (official spec) and type=10 (some servers use this)
+				for _, trackType := range []string{"7", "10"} {
+					path := "/library/sections/" + sectionID + "/all?type=" + trackType
+					log.Printf("Fetching music tracks from path: %s", path)
+					if err := s.Client.Get(path, &results); err == nil {
+						if results.MediaContainer.Size > 0 {
+							log.Printf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
+							trackCount = int64(results.MediaContainer.Size)
+							break
+						} else {
+							log.Printf("No tracks found using type=%s for section %s", trackType, sectionID)
+						}
+					} else {
+						log.Printf("Error fetching music tracks using type=%s for section %s: %v", trackType, sectionID, err)
+					}
 				}
+
+				mu.Lock()
+				musicTotal += trackCount
+				mu.Unlock()
 			}(lib.ID)
 		}
 	}
 	wg.Wait()
 	close(sem)
+
+	log.Printf("Final music count: %d", musicTotal)
 
 	// Update server state under lock.
 	s.mtx.Lock()
