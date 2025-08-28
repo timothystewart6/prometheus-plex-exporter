@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,12 +72,16 @@ func (c *Client) Do(request *http.Request, data any) error {
 		return ErrNotFound
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	// Decode directly from the response body into the provided target to
+	// avoid buffering the entire body in memory (io.ReadAll -> Unmarshal
+	// creates an extra large allocation for big responses).
+	if data == nil {
+		// Nothing to decode into, just consume and return.
+		return nil
 	}
 
-	return json.Unmarshal(body, &data)
+	dec := json.NewDecoder(resp.Body)
+	return dec.Decode(data)
 }
 
 func (c *Client) Get(path string, data any) error {
@@ -87,5 +90,6 @@ func (c *Client) Get(path string, data any) error {
 		return err
 	}
 
-	return c.Do(req, &data)
+	// Pass the target directly (don't take address of the interface parameter).
+	return c.Do(req, data)
 }
