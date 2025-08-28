@@ -178,7 +178,8 @@ func (s *Server) Refresh() error {
 		switch lib.Type {
 		case "movie":
 			moviesTotal += lib.ItemsCount
-		case "music":
+		case "music", "artist":
+			// Some Plex servers report music libraries as "artist" rather than "music"
 			musicTotal += lib.ItemsCount
 		case "photo":
 			photosTotal += lib.ItemsCount
@@ -216,8 +217,8 @@ func (s *Server) Refresh() error {
 			}(lib.ID)
 		}
 
-		if lib.Type == "music" {
-			log.Printf("Found music library: %s (ID: %s)", lib.Name, lib.ID)
+		if lib.Type == "music" || lib.Type == "artist" {
+			log.Printf("Found music library: %s (ID: %s, type: %s)", lib.Name, lib.ID, lib.Type)
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(sectionID string) {
