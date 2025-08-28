@@ -3,6 +3,9 @@ version: 2
 
 run:
   timeout: 5m
+  skip-dirs:
+    - vendor
+  skip-dirs-use-default: false
 
 linters:
   enable:

@@ -450,17 +450,17 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		// Fetch metadata with retries in case the server hasn't populated it yet.
 		var metadata plex.MediaMetadata
 		var metaErr error
-			for attempt := 1; attempt <= MetadataMaxRetries; attempt++ {
-				metadata, metaErr = l.conn.GetMetadata(n.RatingKey)
-				if metaErr == nil && len(metadata.MediaContainer.Metadata) > 0 {
-					break
-				}
-				// if this was the last attempt break and we'll log below
-				if attempt < MetadataMaxRetries {
-					backoff := MetadataBaseDelay * (time.Duration(1) << (attempt - 1))
-					time.Sleep(backoff)
-				}
+		for attempt := 1; attempt <= MetadataMaxRetries; attempt++ {
+			metadata, metaErr = l.conn.GetMetadata(n.RatingKey)
+			if metaErr == nil && len(metadata.MediaContainer.Metadata) > 0 {
+				break
 			}
+			// if this was the last attempt break and we'll log below
+			if attempt < MetadataMaxRetries {
+				backoff := MetadataBaseDelay * (time.Duration(1) << (attempt - 1))
+				time.Sleep(backoff)
+			}
+		}
 
 		if metaErr != nil {
 			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification after retries, skipping", "RatingKey", n.RatingKey, "err", metaErr)
