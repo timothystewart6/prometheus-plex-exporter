@@ -26,6 +26,10 @@ type Library struct {
 	lastEpisodeFetch int64
 	// lastEpisodeCount stores the last successful exact episode count.
 	lastEpisodeCount int64
+	// lastItemsFetch and lastItemsCount cache the unfiltered /library/sections/<id>/all
+	// response so we can avoid re-querying library item counts too frequently.
+	lastItemsFetch int64
+	lastItemsCount int64
 }
 
 func isLibraryDirectoryType(directoryType string) bool {

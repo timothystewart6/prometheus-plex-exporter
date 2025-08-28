@@ -91,21 +91,25 @@ func NewServer(serverURL, token string) (*Server, error) {
 	}
 
 	// Configure library refresh interval from environment variable
-	// LIBRARY_REFRESH_INTERVAL must be integer minutes (e.g. "60" for 60 minutes).
+	// LIBRARY_REFRESH_INTERVAL must be integer minutes (e.g. "15" for 15 minutes).
+	// If unset, default to 15 minutes. If explicitly set to 0, caching is disabled.
 	if v := os.Getenv("LIBRARY_REFRESH_INTERVAL"); v != "" {
 		if mins, err := strconv.Atoi(v); err == nil && mins >= 0 {
 			server.LibraryRefreshInterval = time.Duration(mins) * time.Minute
 		} else {
-			log.Printf("invalid LIBRARY_REFRESH_INTERVAL %q; expected integer minutes (e.g. 60); using default", v)
+			log.Printf("invalid LIBRARY_REFRESH_INTERVAL %q; expected integer minutes (e.g. 15); using default", v)
 		}
+	} else {
+		// default to 15 minutes when not set
+		server.LibraryRefreshInterval = 15 * time.Minute
 	}
 
-	// Log effective interval in minutes (defaulted later to 60 if zero)
-	eff := server.LibraryRefreshInterval
-	if eff == 0 {
-		eff = time.Hour
+	// Log effective interval; if 0 then caching is disabled
+	if server.LibraryRefreshInterval == 0 {
+		log.Printf("Library refresh interval disabled; caching is off")
+	} else {
+		log.Printf("Library refresh interval set to %d minutes", int(server.LibraryRefreshInterval.Minutes()))
 	}
-	log.Printf("Library refresh interval set to %d minutes", int(eff.Minutes()))
 
 	err = server.Refresh()
 	if err != nil {
@@ -174,13 +178,41 @@ func (s *Server) Refresh() error {
 				}
 
 				var results ttPlex.SearchResults
+				// Check existing server cache for recent items count to avoid the expensive call.
+				// If LibraryRefreshInterval == 0 then caching is disabled and we always fetch.
+				usedCache := false
+				if s.LibraryRefreshInterval > 0 {
+					interval := s.LibraryRefreshInterval
+					s.mtx.Lock()
+					for _, old := range s.libraries {
+						if old.ID == lib.ID {
+							if old.lastItemsFetch != 0 && time.Now().Unix()-old.lastItemsFetch < int64(interval.Seconds()) {
+								lib.ItemsCount = old.lastItemsCount
+								lib.lastItemsCount = old.lastItemsCount
+								lib.lastItemsFetch = old.lastItemsFetch
+								usedCache = true
+							}
+							break
+						}
+					}
+					s.mtx.Unlock()
+				}
+
 				path := "/library/sections/" + lib.ID + "/all"
-				log.Printf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
-				if err := s.Client.Get(path, &results); err == nil {
-					lib.ItemsCount = int64(results.MediaContainer.Size)
-					log.Printf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
+				if usedCache {
+					log.Printf("Using cached items count for library %s (ID: %s): %d", lib.Name, lib.ID, lib.ItemsCount)
 				} else {
-					log.Printf("Error fetching items for library %s (ID: %s): %v", lib.Name, lib.ID, err)
+					log.Printf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
+					if err := s.Client.Get(path, &results); err == nil {
+						lib.ItemsCount = int64(results.MediaContainer.Size)
+						if s.LibraryRefreshInterval > 0 {
+							lib.lastItemsCount = lib.ItemsCount
+							lib.lastItemsFetch = time.Now().Unix()
+						}
+						log.Printf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
+					} else {
+						log.Printf("Error fetching items for library %s (ID: %s): %v", lib.Name, lib.ID, err)
+					}
 				}
 
 				newLibraries = append(newLibraries, lib)
@@ -227,24 +259,22 @@ func (s *Server) Refresh() error {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				// Determine effective refresh interval
-				interval := s.LibraryRefreshInterval
-				if interval == 0 {
-					interval = time.Hour
-				}
-
-				// Check library cache to decide whether to skip fetching
+				// Check library cache to decide whether to skip fetching. If LibraryRefreshInterval == 0
+				// caching is disabled and we always fetch.
 				useCached := false
-				s.mtx.Lock()
-				for _, l := range s.libraries {
-					if l.ID == sectionID {
-						if l.lastEpisodeFetch != 0 && time.Now().Unix()-l.lastEpisodeFetch < int64(interval.Seconds()) {
-							useCached = true
+				interval := s.LibraryRefreshInterval
+				if s.LibraryRefreshInterval > 0 {
+					s.mtx.Lock()
+					for _, l := range s.libraries {
+						if l.ID == sectionID {
+							if l.lastEpisodeFetch != 0 && time.Now().Unix()-l.lastEpisodeFetch < int64(interval.Seconds()) {
+								useCached = true
+							}
+							break
 						}
-						break
 					}
+					s.mtx.Unlock()
 				}
-				s.mtx.Unlock()
 
 				if useCached {
 					log.Printf("Skipping episode fetch for section %s; cached within %s", sectionID, interval)
@@ -266,16 +296,18 @@ func (s *Server) Refresh() error {
 						episodesTotal += int64(results.MediaContainer.Size)
 						mu.Unlock()
 
-						// update library cache
-						s.mtx.Lock()
-						for _, l := range s.libraries {
-							if l.ID == sectionID {
-								l.lastEpisodeCount = int64(results.MediaContainer.Size)
-								l.lastEpisodeFetch = time.Now().Unix()
-								break
+						// update library cache only when caching enabled
+						if s.LibraryRefreshInterval > 0 {
+							s.mtx.Lock()
+							for _, l := range s.libraries {
+								if l.ID == sectionID {
+									l.lastEpisodeCount = int64(results.MediaContainer.Size)
+									l.lastEpisodeFetch = time.Now().Unix()
+									break
+								}
 							}
+							s.mtx.Unlock()
 						}
-						s.mtx.Unlock()
 					} else {
 						log.Printf("Error fetching episodes for section %s: %v", sectionID, err)
 					}
@@ -293,30 +325,29 @@ func (s *Server) Refresh() error {
 				var results ttPlex.SearchResults
 				var trackCount int64
 
-				// Determine effective refresh interval
+				// Check cache: if LibraryRefreshInterval == 0 caching is disabled.
 				interval := s.LibraryRefreshInterval
-				if interval == 0 {
-					interval = time.Hour
-				}
-
-				// If the library has a recent successful fetch, skip the expensive call
-				// and use the previously cached ItemsCount. We check lastMusicFetch on
-				// the library through s.Library (under lock) to avoid races.
 				useCached := false
-				s.mtx.Lock()
-				// find library in s.libraries and inspect its cache fields
-				for _, l := range s.libraries {
-					if l.ID == sectionID {
-						if l.lastMusicFetch != 0 && time.Now().Unix()-l.lastMusicFetch < int64(interval.Seconds()) {
-							useCached = true
+				if s.LibraryRefreshInterval > 0 {
+					s.mtx.Lock()
+					// find library in s.libraries and inspect its cache fields
+					for _, l := range s.libraries {
+						if l.ID == sectionID {
+							if l.lastMusicFetch != 0 && time.Now().Unix()-l.lastMusicFetch < int64(interval.Seconds()) {
+								useCached = true
+							}
+							break
 						}
-						break
 					}
+					s.mtx.Unlock()
 				}
-				s.mtx.Unlock()
 
 				if useCached {
-					log.Printf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
+					if s.LibraryRefreshInterval > 0 {
+						log.Printf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
+					} else {
+						log.Printf("Skipping music fetch for section %s; caching is disabled, but using last known value if present", sectionID)
+					}
 					// use the last successful exact track count if available,
 					// otherwise fall back to the unfiltered ItemsCount.
 					s.mtx.Lock()
@@ -344,9 +375,11 @@ func (s *Server) Refresh() error {
 								s.mtx.Lock()
 								for _, l := range s.libraries {
 									if l.ID == sectionID {
-										l.cachedTrackType = trackType
-										l.lastMusicFetch = time.Now().Unix()
-										l.lastMusicCount = int64(results.MediaContainer.Size)
+												l.cachedTrackType = trackType
+												if s.LibraryRefreshInterval > 0 {
+													l.lastMusicFetch = time.Now().Unix()
+													l.lastMusicCount = int64(results.MediaContainer.Size)
+												}
 										break
 									}
 								}
