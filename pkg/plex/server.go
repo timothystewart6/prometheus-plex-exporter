@@ -3,7 +3,9 @@ package plex
 import (
 	"log"
 	"net/url"
+	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -55,6 +57,9 @@ type Server struct {
 	MusicCount      int64
 	PhotoCount      int64
 	OtherVideoCount int64
+	// LibraryRefreshInterval controls how often we re-query expensive per-library
+	// counts (music tracks, episodes). If zero, defaults to 1h.
+	LibraryRefreshInterval time.Duration
 }
 
 type StatisticsBandwidth struct {
@@ -84,6 +89,23 @@ func NewServer(serverURL, token string) (*Server, error) {
 		Client:          client,
 		lastBandwidthAt: int(time.Now().Unix()),
 	}
+
+	// Configure library refresh interval from environment variable
+	// LIBRARY_REFRESH_INTERVAL must be integer minutes (e.g. "60" for 60 minutes).
+	if v := os.Getenv("LIBRARY_REFRESH_INTERVAL"); v != "" {
+		if mins, err := strconv.Atoi(v); err == nil && mins >= 0 {
+			server.LibraryRefreshInterval = time.Duration(mins) * time.Minute
+		} else {
+			log.Printf("invalid LIBRARY_REFRESH_INTERVAL %q; expected integer minutes (e.g. 60); using default", v)
+		}
+	}
+
+	// Log effective interval in minutes (defaulted later to 60 if zero)
+	eff := server.LibraryRefreshInterval
+	if eff == 0 {
+		eff = time.Hour
+	}
+	log.Printf("Library refresh interval set to %d minutes", int(eff.Minutes()))
 
 	err = server.Refresh()
 	if err != nil {
@@ -205,14 +227,58 @@ func (s *Server) Refresh() error {
 				defer wg.Done()
 				defer func() { <-sem }()
 				var results ttPlex.SearchResults
-				path := "/library/sections/" + sectionID + "/all?type=4"
-				log.Printf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
-				if err := s.Client.Get(path, &results); err == nil {
-					mu.Lock()
-					episodesTotal += int64(results.MediaContainer.Size)
-					mu.Unlock()
+				// Determine effective refresh interval
+				interval := s.LibraryRefreshInterval
+				if interval == 0 {
+					interval = time.Hour
+				}
+
+				// Check library cache to decide whether to skip fetching
+				useCached := false
+				s.mtx.Lock()
+				for _, l := range s.libraries {
+					if l.ID == sectionID {
+						if l.lastEpisodeFetch != 0 && time.Now().Unix()-l.lastEpisodeFetch < int64(interval.Seconds()) {
+							useCached = true
+						}
+						break
+					}
+				}
+				s.mtx.Unlock()
+
+				if useCached {
+					log.Printf("Skipping episode fetch for section %s; cached within %s", sectionID, interval)
+					s.mtx.Lock()
+					for _, l := range s.libraries {
+						if l.ID == sectionID {
+							mu.Lock()
+							episodesTotal += l.lastEpisodeCount
+							mu.Unlock()
+							break
+						}
+					}
+					s.mtx.Unlock()
 				} else {
-					log.Printf("Error fetching episodes for section %s: %v", sectionID, err)
+					path := "/library/sections/" + sectionID + "/all?type=4"
+					log.Printf("Fetching episodes for show library ID: %s from path: %s", sectionID, path)
+					if err := s.Client.Get(path, &results); err == nil {
+						mu.Lock()
+						episodesTotal += int64(results.MediaContainer.Size)
+						mu.Unlock()
+
+						// update library cache
+						s.mtx.Lock()
+						for _, l := range s.libraries {
+							if l.ID == sectionID {
+								l.lastEpisodeCount = int64(results.MediaContainer.Size)
+								l.lastEpisodeFetch = time.Now().Unix()
+								break
+							}
+						}
+						s.mtx.Unlock()
+					} else {
+						log.Printf("Error fetching episodes for section %s: %v", sectionID, err)
+					}
 				}
 			}(lib.ID)
 		}
@@ -227,20 +293,71 @@ func (s *Server) Refresh() error {
 				var results ttPlex.SearchResults
 				var trackCount int64
 
-				// Try both type=7 (official spec) and type=10 (some servers use this)
-				for _, trackType := range []string{"7", "10"} {
-					path := "/library/sections/" + sectionID + "/all?type=" + trackType
-					log.Printf("Fetching music tracks from path: %s", path)
-					if err := s.Client.Get(path, &results); err == nil {
-						if results.MediaContainer.Size > 0 {
-							log.Printf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
-							trackCount = int64(results.MediaContainer.Size)
-							break
-						} else {
-							log.Printf("No tracks found using type=%s for section %s", trackType, sectionID)
+				// Determine effective refresh interval
+				interval := s.LibraryRefreshInterval
+				if interval == 0 {
+					interval = time.Hour
+				}
+
+				// If the library has a recent successful fetch, skip the expensive call
+				// and use the previously cached ItemsCount. We check lastMusicFetch on
+				// the library through s.Library (under lock) to avoid races.
+				useCached := false
+				s.mtx.Lock()
+				// find library in s.libraries and inspect its cache fields
+				for _, l := range s.libraries {
+					if l.ID == sectionID {
+						if l.lastMusicFetch != 0 && time.Now().Unix()-l.lastMusicFetch < int64(interval.Seconds()) {
+							useCached = true
 						}
-					} else {
-						log.Printf("Error fetching music tracks using type=%s for section %s: %v", trackType, sectionID, err)
+						break
+					}
+				}
+				s.mtx.Unlock()
+
+				if useCached {
+					log.Printf("Skipping music fetch for section %s; cached within %s", sectionID, interval)
+					// use the last successful exact track count if available,
+					// otherwise fall back to the unfiltered ItemsCount.
+					s.mtx.Lock()
+					for _, l := range s.libraries {
+						if l.ID == sectionID {
+							if l.lastMusicCount != 0 {
+								trackCount = l.lastMusicCount
+							} else {
+								trackCount = l.ItemsCount
+							}
+							break
+						}
+					}
+					s.mtx.Unlock()
+				} else {
+					// Prefer type=10 (some servers) then fallback to type=7
+					for _, trackType := range []string{"10", "7"} {
+						path := "/library/sections/" + sectionID + "/all?type=" + trackType
+						log.Printf("Fetching music tracks from path: %s", path)
+						if err := s.Client.Get(path, &results); err == nil {
+							if results.MediaContainer.Size > 0 {
+								log.Printf("Successfully fetched %d music tracks using type=%s from section %s", results.MediaContainer.Size, trackType, sectionID)
+								trackCount = int64(results.MediaContainer.Size)
+								// update library cache with successful type and timestamp
+								s.mtx.Lock()
+								for _, l := range s.libraries {
+									if l.ID == sectionID {
+										l.cachedTrackType = trackType
+										l.lastMusicFetch = time.Now().Unix()
+										l.lastMusicCount = int64(results.MediaContainer.Size)
+										break
+									}
+								}
+								s.mtx.Unlock()
+								break
+							} else {
+								log.Printf("No tracks found using type=%s for section %s", trackType, sectionID)
+							}
+						} else {
+							log.Printf("Error fetching music tracks using type=%s for section %s: %v", trackType, sectionID, err)
+						}
 					}
 				}
 

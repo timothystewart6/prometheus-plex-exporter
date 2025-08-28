@@ -62,6 +62,27 @@ services:
 
 ## Metrics
 
+## .env / Optional Environment Settings
+
+You can supply environment variables via your container runtime, `docker run -e VAR=...`, `docker-compose`, or with a `.env` file for local development. The exporter recognizes the following optional environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LIBRARY_REFRESH_INTERVAL` | How often to re-query expensive per-library counts (music tracks and episode counts) in minutes. Must be an integer number of minutes. Defaults to `60` (1 hour) when unset. | `60` |
+
+Example `.env` file:
+
+```bash
+PLEX_SERVER=http://192.168.1.100:32400
+PLEX_TOKEN=abcd1234efgh5678
+LIBRARY_REFRESH_INTERVAL=120
+```
+
+Notes:
+
+- `LIBRARY_REFRESH_INTERVAL` is intentionally minutes-only to avoid accidental short intervals. Set to `0` to disable caching and always re-query (not recommended).
+- The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are unchanged and required for the exporter to connect to your Plex server.
+
 The exporter provides comprehensive real-time metrics about your Plex server via WebSocket monitoring:
 
 ### Server Metrics
