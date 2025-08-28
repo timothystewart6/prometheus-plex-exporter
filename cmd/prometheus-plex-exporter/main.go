@@ -71,7 +71,9 @@ func main() {
 	// Log key environment variables at startup (mask sensitive values)
 	libRefresh := os.Getenv("LIBRARY_REFRESH_INTERVAL")
 	if libRefresh == "" {
-		libRefresh = "15"
+		libRefresh = "15 (minutes, default; 0 = disable caching)"
+	} else {
+		libRefresh = libRefresh + " (minutes; 0 = disable caching)"
 	}
 	debugFlag := os.Getenv("DEBUG")
 	if debugFlag == "" {

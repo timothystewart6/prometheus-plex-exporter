@@ -1,13 +1,16 @@
 package plex
 
 import (
-	"log"
+	"fmt"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
+
+	kitlog "github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -64,10 +67,15 @@ type Server struct {
 	Debug bool
 }
 
+// pkg-level logger used for structured logs within this package. Tests and
+// callers may still pass their own logger to listeners; this logger is a
+// sensible default for package-level messages.
+var pkgLog = kitlog.NewLogfmtLogger(kitlog.NewSyncWriter(os.Stderr))
+
 // debugf logs only when server debug is enabled.
 func (s *Server) debugf(format string, args ...interface{}) {
 	if s != nil && s.Debug {
-		log.Printf(format, args...)
+		_ = level.Debug(pkgLog).Log("msg", fmt.Sprintf(format, args...))
 	}
 }
 
@@ -106,7 +114,7 @@ func NewServer(serverURL, token string) (*Server, error) {
 		if mins, err := strconv.Atoi(v); err == nil && mins >= 0 {
 			server.LibraryRefreshInterval = time.Duration(mins) * time.Minute
 		} else {
-			log.Printf("invalid LIBRARY_REFRESH_INTERVAL %q; expected integer minutes (e.g. 15); using default", v)
+			_ = level.Warn(pkgLog).Log("msg", "invalid LIBRARY_REFRESH_INTERVAL", "value", v, "note", "expected integer minutes (e.g. 15); falling back to default 15 minutes")
 		}
 	} else {
 		// default to 15 minutes when not set
@@ -120,9 +128,9 @@ func NewServer(serverURL, token string) (*Server, error) {
 
 	// Log effective interval; if 0 then caching is disabled
 	if server.LibraryRefreshInterval == 0 {
-		log.Printf("Library refresh interval disabled; caching is off")
+		_ = level.Info(pkgLog).Log("msg", "Library refresh interval disabled; caching is off")
 	} else {
-		log.Printf("Library refresh interval set to %d minutes", int(server.LibraryRefreshInterval.Minutes()))
+		_ = level.Info(pkgLog).Log("msg", "Library refresh interval set", "minutes", int(server.LibraryRefreshInterval.Minutes()))
 	}
 
 	err = server.Refresh()
@@ -214,7 +222,12 @@ func (s *Server) Refresh() error {
 
 				path := "/library/sections/" + lib.ID + "/all"
 				if usedCache {
-					s.debugf("Using cached items count for library %s (ID: %s): %d", lib.Name, lib.ID, lib.ItemsCount)
+					// Include a human-friendly content type in the log so it's
+					// clear whether the cached count represents movies, artists,
+					// photos, etc. This avoids confusion when later we fetch
+					// filtered counts (e.g. music tracks) and they differ.
+					contentType := getContentTypeForLibrary(lib.Type)
+					s.debugf("Using cached items count for library %s (ID: %s, content_type=%s): %d", lib.Name, lib.ID, contentType, lib.ItemsCount)
 				} else {
 					s.debugf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
 					if err := s.Client.Get(path, &results); err == nil {
@@ -225,7 +238,7 @@ func (s *Server) Refresh() error {
 						}
 						s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
 					} else {
-						log.Printf("Error fetching items for library %s (ID: %s): %v", lib.Name, lib.ID, err)
+						_ = level.Error(pkgLog).Log("msg", "Error fetching items for library", "library", lib.Name, "id", lib.ID, "err", err)
 					}
 				}
 
@@ -323,7 +336,7 @@ func (s *Server) Refresh() error {
 							s.mtx.Unlock()
 						}
 					} else {
-						log.Printf("Error fetching episodes for section %s: %v", sectionID, err)
+						_ = level.Error(pkgLog).Log("msg", "Error fetching episodes for section", "section", sectionID, "err", err)
 					}
 				}
 			}(lib.ID)
@@ -363,14 +376,20 @@ func (s *Server) Refresh() error {
 						s.debugf("Skipping music fetch for section %s; caching is disabled, but using last known value if present", sectionID)
 					}
 					// use the last successful exact track count if available,
-					// otherwise fall back to the unfiltered ItemsCount.
+					// otherwise fall back to the unfiltered ItemsCount. Include
+					// the cached_type in logs so operators know whether the
+					// cached count represents tracks (type=7/10) or an
+					// unfiltered items count (e.g. artists).
 					s.mtx.Lock()
 					for _, l := range s.libraries {
 						if l.ID == sectionID {
 							if l.lastMusicCount != 0 {
 								trackCount = l.lastMusicCount
+								s.debugf("Using cached music count for section %s; cached_type=%s count=%d", sectionID, l.cachedTrackType, trackCount)
 							} else {
 								trackCount = l.ItemsCount
+								contentType := getContentTypeForLibrary(l.Type)
+								s.debugf("Using cached items count for section %s; cached_content_type=%s count=%d", sectionID, contentType, trackCount)
 							}
 							break
 						}
@@ -403,7 +422,7 @@ func (s *Server) Refresh() error {
 								s.debugf("No tracks found using type=%s for section %s", trackType, sectionID)
 							}
 						} else {
-							log.Printf("Error fetching music tracks using type=%s for section %s: %v", trackType, sectionID, err)
+							_ = level.Error(pkgLog).Log("msg", "Error fetching music tracks", "type", trackType, "section", sectionID, "err", err)
 						}
 					}
 				}
