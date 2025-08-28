@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,19 @@ var (
 	log = kitlog.NewLogfmtLogger(kitlog.NewSyncWriter(os.Stderr))
 )
 
+// maskToken returns a masked representation of the token suitable for logs.
+// It preserves the last 4 characters when possible and replaces the rest with '*'.
+func maskToken(t string) string {
+	if t == "" {
+		return "(unset)"
+	}
+	if len(t) <= 4 {
+		return "****"
+	}
+	// keep last 4 characters visible
+	return strings.Repeat("*", len(t)-4) + t[len(t)-4:]
+}
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -40,6 +54,43 @@ func main() {
 		_ = level.Error(log).Log("msg", "PLEX_TOKEN environment variable must be specified")
 		os.Exit(1)
 	}
+
+	// Support TZ environment variable: if set, attempt to load and apply it
+	tzEnv := os.Getenv("TZ")
+	tzResolved := "(system)"
+	if tzEnv != "" {
+		if loc, err := time.LoadLocation(tzEnv); err != nil {
+			_ = level.Warn(log).Log("msg", "invalid TZ, using system default", "TZ", tzEnv, "error", err)
+			tzResolved = "invalid: " + tzEnv
+		} else {
+			time.Local = loc
+			tzResolved = loc.String()
+		}
+	}
+
+	// Log key environment variables at startup (mask sensitive values)
+	libRefresh := os.Getenv("LIBRARY_REFRESH_INTERVAL")
+	if libRefresh == "" {
+		libRefresh = "15"
+	}
+	debugFlag := os.Getenv("DEBUG")
+	if debugFlag == "" {
+		debugFlag = "false"
+	}
+	skipTLS := os.Getenv("SKIP_TLS_VERIFICATION")
+	if skipTLS == "" {
+		skipTLS = "false"
+	}
+
+	_ = level.Info(log).Log(
+		"msg", "starting exporter",
+		"PLEX_SERVER", serverAddress,
+		"PLEX_TOKEN", maskToken(plexToken),
+		"LIBRARY_REFRESH_INTERVAL", libRefresh,
+		"DEBUG", debugFlag,
+		"SKIP_TLS_VERIFICATION", skipTLS,
+		"TZ", tzResolved,
+	)
 
 	server, err := plex.NewServer(serverAddress, plexToken)
 	if err != nil {

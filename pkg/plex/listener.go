@@ -42,7 +42,9 @@ var (
 )
 
 // newPlex is a variable so tests can replace it with a fake constructor.
-var newPlex = plex.New
+// Keep the wrapper with the old two-argument signature so tests that assign
+// a func(base, token string) (*ttPlex.Plex, error) remain compatible.
+var newPlex = func(base, token string) (*plex.Plex, error) { return plex.New(base, token) }
 
 type plexClient interface {
 	GetSessions() (plex.CurrentSessions, error)

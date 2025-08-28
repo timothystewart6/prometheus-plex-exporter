@@ -41,7 +41,7 @@ github.com/prometheus/common/model
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
-# github.com/timothystewart6/go-plex-client v0.0.0-20250826032528-0a52ab58684c
+# github.com/timothystewart6/go-plex-client v0.0.0-20250828040052-a4524f91f816
 ## explicit; go 1.21
 github.com/timothystewart6/go-plex-client
 # golang.org/x/sys v0.33.0

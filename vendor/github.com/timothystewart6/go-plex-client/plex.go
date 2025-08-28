@@ -84,10 +84,13 @@ func WithInsecureSkipVerify() Option {
 			if d.TLSClientConfig == nil {
 				d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 			} else {
-				// clone existing TLS config and set InsecureSkipVerify
-				cfg := *d.TLSClientConfig
-				cfg.InsecureSkipVerify = true
-				d.TLSClientConfig = &cfg
+				// clone existing TLS config and set InsecureSkipVerify safely
+				if cloned := d.TLSClientConfig.Clone(); cloned != nil {
+					cloned.InsecureSkipVerify = true
+					d.TLSClientConfig = cloned
+				} else {
+					d.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+				}
 			}
 			p.WebsocketDialer = &d
 		} else {

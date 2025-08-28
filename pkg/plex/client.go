@@ -1,11 +1,13 @@
 package plex
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -23,10 +25,20 @@ func NewClient(serverURL, token string) (*Client, error) {
 		return nil, err
 	}
 
+	// Configure HTTP client and optional TLS skip verification for self-signed
+	// or mismatched certificates. Honor SKIP_TLS_VERIFICATION env var when set
+	// to "1" or "true".
+	httpClient := http.Client{}
+	if v := os.Getenv("SKIP_TLS_VERIFICATION"); v == "1" || v == "true" {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
 	client := &Client{
 		Token:      token,
 		URL:        parsed,
-		httpClient: http.Client{},
+		httpClient: httpClient,
 	}
 
 	return client, nil

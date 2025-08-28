@@ -53,44 +53,33 @@ services:
 
 ## Configuration
 
-### Required Environment Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `PLEX_SERVER` | Full URL to your Plex server | `http://192.168.1.100:32400` |
-| `PLEX_TOKEN` | [Plex authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) | `abcd1234efgh5678` |
-
 ## Metrics
 
-## Optional Environment Settings
+### Environment Variables
 
-You can supply environment variables via your container runtime, `docker run -e VAR=...`, `docker-compose`, or with a `.env` file for local development. The exporter recognizes the following optional environment variables:
+You can supply environment variables via your container runtime, `docker run -e VAR=...`, `docker-compose`, or with a `.env` file. The exporter recognizes the following environment variables:
 
-| Variable | Description | Example |
+| Variable | Description | Default |
 |----------|-------------|---------|
+| `PLEX_SERVER` | Full URL to your Plex server (required) | `(required)` |
+| `PLEX_TOKEN` | [Plex authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) used to authenticate with your Plex server (required) | `(required)` |
 | `LIBRARY_REFRESH_INTERVAL` | How often to re-query expensive per-library counts (music tracks, episode counts, and library items) in minutes. Must be an integer number of minutes. Defaults to `15` when unset. Set to `0` to disable caching and always re-query. | `15` |
-| `DEBUG` | Enable verbose debug logging. Set to `true` to turn on debug-level logs (useful for troubleshooting). Defaults to off. | `true` |
+| `DEBUG` | Enable verbose debug logging. Set to `true` to turn on debug-level logs (useful for troubleshooting). Defaults to off. | `false` |
+| `SKIP_TLS_VERIFICATION` | Optional convenience for connecting to Plex servers with self-signed or mismatched TLS certificates. When set to `true` the exporter (and the vendored Plex client) will skip TLS certificate verification for both HTTP and websocket connections. THIS IS INSECURE — only use in trusted networks or testing. Defaults to off. | `false` |
+| `TZ` | Optional timezone name (IANA location, e.g. `America/Chicago`) to use for log timestamps and any local time calculations. If unset the system local timezone is used. | `(system)` |
 
 Example `.env` file:
 
 ```bash
 PLEX_SERVER=http://192.168.1.100:32400
 PLEX_TOKEN=abcd1234efgh5678
-# Refresh caches every 15 minutes (default)
-LIBRARY_REFRESH_INTERVAL=15
-# Enable debug logs
-DEBUG=true
+TZ=America/Chicago
 ```
-
-Notes:
-
-- `LIBRARY_REFRESH_INTERVAL` is intentionally minutes-only to avoid accidental short intervals. Set to `0` to disable caching and always re-query.
-- `DEBUG` enables verbose debug logging. When enabled the exporter will emit debug messages for library fetches, cache hits/skips and music/episode fetch details. The exporter still logs startup warnings and errors regardless of this flag.
 
 Startup note:
 
 - On startup the exporter performs an initial full refresh to populate library and media counts. The startup log will always show the effective `LibraryRefreshInterval` or that caching is disabled.
-- The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are unchanged and required for the exporter to connect to your Plex server.
+- The required `PLEX_SERVER` and `PLEX_TOKEN` environment variables are required for the exporter to connect to your Plex server.
 
 The exporter provides comprehensive real-time metrics about your Plex server via WebSocket monitoring:
 
