@@ -41,6 +41,123 @@
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "fixedColor": "light-orange",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 4000,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", stream_type=~\"(transcode|directplay|DirectPlay)\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Total Streams",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", stream_type=~\"(directplay|DirectPlay)\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Direct Play",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", stream_type=\"transcode\", transcode_type=~\"(video|both)\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Video Transcodes",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", stream_type=\"transcode\", transcode_type=~\"(audio|both)\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Audio Transcodes",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", subtitle_action=\"transcode\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Subtitle Transcode",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "count( sum by (session) ( rate(play_seconds_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", subtitle_action=\"burn\"}[$__rate_interval]) ) > 0 ) or on() vector(0)",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Subtitle Burn",
+          "refId": "F"
+        }
+      ],
+      "title": "Stream Counts",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
           "links": [],
           "mappings": [],
           "thresholds": {
@@ -55,7 +172,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 1
+        "y": 4
       },
       "id": 3,
       "options": {
@@ -127,7 +244,7 @@
         "h": 4,
         "w": 3,
         "x": 6,
-        "y": 1
+        "y": 4
       },
       "id": 4,
       "options": {
@@ -187,7 +304,7 @@
         "h": 4,
         "w": 15,
         "x": 9,
-        "y": 1
+        "y": 4
       },
       "id": 5,
       "options": {
@@ -243,7 +360,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 5
+        "y": 8
       },
       "id": 6,
       "options": {
@@ -315,7 +432,7 @@
         "h": 4,
         "w": 3,
         "x": 6,
-        "y": 5
+        "y": 8
       },
       "id": 7,
       "options": {
@@ -375,7 +492,7 @@
         "h": 4,
         "w": 15,
         "x": 9,
-        "y": 5
+        "y": 8
       },
       "id": 8,
       "options": {
@@ -433,10 +550,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 4,
         "w": 6,
         "x": 0,
-        "y": 9
+        "y": 12
       },
       "id": 999,
       "options": {
@@ -476,6 +593,93 @@
       "datasource": {
         "uid": "$datasource"
       },
+      "description": "TX and RX across all servers (bits/sec).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "thresholds"
+          },
+          "links": [],
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 100000000
+              },
+              {
+                "color": "red",
+                "value": 1000000000
+              }
+            ]
+          },
+          "unit": "bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 12
+      },
+      "id": 4200,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "/^(TX|RX)$/",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "8 * sum(rate(transmit_bytes_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "TX",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "8 * sum(rate(process_network_receive_bytes_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "RX",
+          "refId": "B"
+        }
+      ],
+      "title": "Network Bandwidth (Total)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -494,10 +698,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 4,
         "w": 15,
         "x": 9,
-        "y": 9
+        "y": 12
       },
       "id": 2000,
       "options": {
@@ -637,7 +841,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 16
       },
       "id": 9,
       "options": {
@@ -685,7 +889,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 23
       },
       "id": 10,
       "panels": [],
@@ -756,7 +960,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 24
       },
       "id": 11,
       "options": {
@@ -832,7 +1036,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 31
       },
       "id": 12,
       "options": {
@@ -905,102 +1109,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": []
-          },
-          "unit": "locale",
-          "decimals": 0,
-          "useLocale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 24,
-        "x": 0,
-        "y": 49
-      },
-      "id": 4000,
-      "links": [],
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "last"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.5.0-cloud.5.a016665c",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "expr": "sum(plays_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\"}) or vector(0)",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "Total Streams",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "expr": "sum(plays_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", stream_type=~\"DirectPlay|directplay|DirectStream\"}) or vector(0)",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "Direct Play",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "expr": "sum(plays_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", transcode_type=~\"video|both\"}) or vector(0)",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "Video Transcodes",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "expr": "sum(plays_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", transcode_type=~\"audio|both\"}) or vector(0)",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "Audio Transcodes",
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "expr": "sum(plays_total{job=~\"$job\", instance=~\"$instance\", server=~\"$server\", subtitle_action=~\"burn|transcode\"}) or vector(0)",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "Subtitle Transcodes",
-          "refId": "E"
-        }
-      ],
-      "title": "Stream Counts",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
           "color": {
             "mode": "palette-classic"
           },
@@ -1038,7 +1146,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 31
       },
       "id": 13,
       "options": {
@@ -1191,7 +1299,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 38
       },
       "id": 14,
       "options": {
@@ -1317,7 +1425,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 34
+        "y": 38
       },
       "id": 15,
       "options": {
@@ -1443,7 +1551,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 34
+        "y": 38
       },
       "id": 16,
       "options": {
@@ -1532,7 +1640,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 45
       },
       "id": 17,
       "panels": [],
@@ -1582,7 +1690,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 46
       },
       "id": 18,
       "options": {
@@ -1703,7 +1811,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 46
       },
       "id": 19,
       "options": {
@@ -1868,5 +1976,5 @@
   "timezone": "browser",
   "title": "PPE Media Server",
   "uid": "426b8c74a8b8d5403b4b3a29656c8342",
-  "version": 9
+  "version": 16
 }
