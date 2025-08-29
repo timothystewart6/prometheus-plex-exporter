@@ -108,3 +108,22 @@ func (c *Client) Get(path string, data any) error {
 	// Pass the target directly (don't take address of the interface parameter).
 	return c.Do(req, data)
 }
+
+// GetWithHeaders performs a GET request like Get but allows callers to supply
+// additional request headers. Useful for Plex headers such as
+// X-Plex-Container-Start and X-Plex-Container-Size to request paged or
+// container-only responses.
+func (c *Client) GetWithHeaders(path string, data any, headers map[string]string) error {
+	req, err := c.NewRequest("GET", path)
+	if err != nil {
+		return err
+	}
+
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+
+	return c.Do(req, data)
+}

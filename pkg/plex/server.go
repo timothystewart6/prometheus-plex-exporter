@@ -2,7 +2,6 @@ package plex
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math/big"
 	"net/url"
 	"os"
@@ -17,8 +16,6 @@ import (
 	"github.com/grafana/plexporter/pkg/log"
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
-
-	ttPlex "github.com/timothystewart6/go-plex-client"
 )
 
 // Plex API type parameter mappings:
@@ -80,12 +77,8 @@ type Server struct {
 // sensible default for package-level messages.
 var pkgLog = log.DefaultLogger()
 
-// debugf logs only when server debug is enabled.
-func (s *Server) debugf(format string, args ...interface{}) {
-	if s != nil && s.Debug {
-		pkgLog.Debug(fmt.Sprintf(format, args...))
-	}
-}
+// debugf logs only when server debug is enabled.  (Previously used for
+// verbose package-level debugging; removed to satisfy linter when unused.)
 
 // Controls for startup deferred full refresh. Defaults are production
 // values; tests in this package may override them to avoid long sleeps.
@@ -219,50 +212,7 @@ func (s *Server) Refresh() error {
 	// original full Refresh). We fetch per-library `/all` when cache is
 	// absent or expired.
 	for _, lib := range libs {
-		usedCache := false
-		if s.LibraryRefreshInterval > 0 {
-			interval := s.LibraryRefreshInterval
-			s.mtx.Lock()
-			for _, old := range s.libraries {
-				if old.ID == lib.ID {
-					if old.lastItemsFetch != 0 && time.Now().Unix()-old.lastItemsFetch < int64(interval.Seconds()) {
-						lib.ItemsCount = old.lastItemsCount
-						lib.lastItemsCount = old.lastItemsCount
-						lib.lastItemsFetch = old.lastItemsFetch
-						usedCache = true
-					}
-					break
-				}
-			}
-			s.mtx.Unlock()
-		}
-
-		if !usedCache {
-			var results ttPlex.SearchResults
-			path := "/library/sections/" + lib.ID + "/all"
-			s.debugf("Fetching items for library %s (ID: %s, type: %s) from path: %s", lib.Name, lib.ID, lib.Type, path)
-			if err := s.Client.Get(path, &results); err == nil {
-				lib.ItemsCount = int64(results.MediaContainer.Size)
-				if s.LibraryRefreshInterval > 0 {
-					// update server cache entry
-					s.mtx.Lock()
-					for _, l := range s.libraries {
-						if l.ID == lib.ID {
-							l.lastItemsCount = lib.ItemsCount
-							l.lastItemsFetch = time.Now().Unix()
-							break
-						}
-					}
-					s.mtx.Unlock()
-				}
-				s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
-			} else {
-				pkgLog.Error("Error fetching items for library",
-					zap.String("library", lib.Name),
-					zap.String("id", lib.ID),
-					zap.Error(err))
-			}
-		}
+		s.ensureLibraryItemsCount(lib)
 	}
 
 	moviesTotal, episodesTotal, musicTotal, photosTotal, otherVideosTotal := s.computeLibraryCounts(libs)
@@ -287,6 +237,94 @@ func (s *Server) Refresh() error {
 	}
 
 	return nil
+}
+
+// ensureLibraryItemsCount populates lib.ItemsCount using cached values when
+// available otherwise querying the Plex server with a minimal payload.
+func (s *Server) ensureLibraryItemsCount(lib *Library) {
+	usedCache := false
+	if s.LibraryRefreshInterval > 0 {
+		interval := s.LibraryRefreshInterval
+		s.mtx.Lock()
+		for _, old := range s.libraries {
+			if old.ID == lib.ID {
+				if old.lastItemsFetch != 0 && time.Now().Unix()-old.lastItemsFetch < int64(interval.Seconds()) {
+					lib.ItemsCount = old.lastItemsCount
+					lib.lastItemsCount = old.lastItemsCount
+					lib.lastItemsFetch = old.lastItemsFetch
+					usedCache = true
+				}
+				break
+			}
+		}
+		s.mtx.Unlock()
+	}
+
+	if usedCache {
+		return
+	}
+
+	// minimal decode shape
+	var sizeOnly struct {
+		MediaContainer struct {
+			Size int `json:"size"`
+		} `json:"MediaContainer"`
+	}
+
+	if lib.Type == "music" || lib.Type == "artist" {
+		candidates := []string{}
+		if lib.cachedTrackType != "" {
+			candidates = append(candidates, lib.cachedTrackType)
+		}
+		for _, t := range []string{"10", "7"} {
+			if lib.cachedTrackType != t {
+				candidates = append(candidates, t)
+			}
+		}
+		headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
+		found := false
+		for _, trackType := range candidates {
+			path := "/library/sections/" + lib.ID + "/all?type=" + trackType
+			if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
+				lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+				s.mtx.Lock()
+				for _, l := range s.libraries {
+					if l.ID == lib.ID {
+						l.cachedTrackType = trackType
+						if s.LibraryRefreshInterval > 0 {
+							l.lastMusicFetch = time.Now().Unix()
+							l.lastMusicCount = lib.ItemsCount
+						}
+						break
+					}
+				}
+				s.mtx.Unlock()
+				found = true
+				break
+			}
+		}
+		if found {
+			return
+		}
+	}
+
+	// fallback generic items count
+	path := "/library/sections/" + lib.ID + "/all"
+	headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
+	if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
+		lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+		if s.LibraryRefreshInterval > 0 {
+			s.mtx.Lock()
+			for _, l := range s.libraries {
+				if l.ID == lib.ID {
+					l.lastItemsCount = lib.ItemsCount
+					l.lastItemsFetch = time.Now().Unix()
+					break
+				}
+			}
+			s.mtx.Unlock()
+		}
+	}
 }
 
 // RefreshLight performs a minimal refresh that populates server metadata and
@@ -409,7 +447,7 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 			go func(sectionID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				var results ttPlex.SearchResults
+				// no large results buffer required; we only need size
 
 				// Check cache
 				useCached := false
@@ -440,16 +478,25 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 					s.mtx.Unlock()
 				} else {
 					path := "/library/sections/" + sectionID + "/all?type=4"
-					if err := s.Client.Get(path, &results); err == nil {
+					var sizeOnly struct {
+						MediaContainer struct {
+							Size int `json:"size"`
+						} `json:"MediaContainer"`
+					}
+					headers := map[string]string{
+						"X-Plex-Container-Start": "0",
+						"X-Plex-Container-Size":  "0",
+					}
+					if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
 						mu.Lock()
-						episodesTotal += int64(results.MediaContainer.Size)
+						episodesTotal += int64(sizeOnly.MediaContainer.Size)
 						mu.Unlock()
 
 						if s.LibraryRefreshInterval > 0 {
 							s.mtx.Lock()
 							for _, l := range s.libraries {
 								if l.ID == sectionID {
-									l.lastEpisodeCount = int64(results.MediaContainer.Size)
+									l.lastEpisodeCount = int64(sizeOnly.MediaContainer.Size)
 									l.lastEpisodeFetch = time.Now().Unix()
 									break
 								}
@@ -471,7 +518,6 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 			go func(sectionID string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				var results ttPlex.SearchResults
 				var trackCount int64
 
 				interval := s.LibraryRefreshInterval
@@ -504,17 +550,26 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 					s.mtx.Unlock()
 				} else {
 					for _, trackType := range []string{"10", "7"} {
+						var sizeOnly struct {
+							MediaContainer struct {
+								Size int `json:"size"`
+							} `json:"MediaContainer"`
+						}
 						path := "/library/sections/" + sectionID + "/all?type=" + trackType
-						if err := s.Client.Get(path, &results); err == nil {
-							if results.MediaContainer.Size > 0 {
-								trackCount = int64(results.MediaContainer.Size)
+						headers := map[string]string{
+							"X-Plex-Container-Start": "0",
+							"X-Plex-Container-Size":  "0",
+						}
+						if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
+							if sizeOnly.MediaContainer.Size > 0 {
+								trackCount = int64(sizeOnly.MediaContainer.Size)
 								s.mtx.Lock()
 								for _, l := range s.libraries {
 									if l.ID == sectionID {
 										l.cachedTrackType = trackType
 										if s.LibraryRefreshInterval > 0 {
 											l.lastMusicFetch = time.Now().Unix()
-											l.lastMusicCount = int64(results.MediaContainer.Size)
+											l.lastMusicCount = int64(sizeOnly.MediaContainer.Size)
 										}
 										break
 									}
