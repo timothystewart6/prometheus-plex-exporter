@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,8 +111,18 @@ func New(baseURL, token string, opts ...Option) (*Plex, error) {
 		return &p, errors.New(ErrorUrlTokenRequired)
 	}
 
+	// Configure HTTP client timeout. Default to 10s for more reliable
+	// behavior in LAN/slow-response environments due to library size, but allow overriding via
+	// PLEX_CLIENT_TIMEOUT_SECONDS (seconds).
+	timeout := 10 * time.Second
+	if v := os.Getenv("PLEX_CLIENT_TIMEOUT_SECONDS"); v != "" {
+		if s, err := strconv.Atoi(v); err == nil && s > 0 {
+			timeout = time.Duration(s) * time.Second
+		}
+	}
+
 	p.HTTPClient = http.Client{
-		Timeout: 3 * time.Second,
+		Timeout: timeout,
 	}
 
 	p.DownloadClient = http.Client{}

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
+	"time"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -26,8 +28,20 @@ func NewClient(serverURL, token string) (*Client, error) {
 
 	// Configure HTTP client and optional TLS skip verification for self-signed
 	// or mismatched certificates. Honor SKIP_TLS_VERIFICATION env var when set
-	// to "1" or "true".
+	// to "1" or "true". Also allow a configurable timeout via
+	// PLEX_CLIENT_TIMEOUT_SECONDS (seconds). Default to 10s to tolerate
+	// slower LAN responses and large libraries.
 	httpClient := http.Client{}
+
+	// Default timeout
+	timeout := 10 * time.Second
+	if v := os.Getenv("PLEX_CLIENT_TIMEOUT_SECONDS"); v != "" {
+		if s, err := strconv.Atoi(v); err == nil && s > 0 {
+			timeout = time.Duration(s) * time.Second
+		}
+	}
+	httpClient.Timeout = timeout
+
 	if v := os.Getenv("SKIP_TLS_VERIFICATION"); v == "1" || v == "true" {
 		// nolint:gosec // InsecureSkipVerify is explicit and controlled by SKIP_TLS_VERIFICATION env var for testing/trusted networks
 		httpClient.Transport = &http.Transport{

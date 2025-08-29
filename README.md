@@ -69,6 +69,7 @@ You can supply environment variables via your container runtime, `docker run -e 
 | `ENVIRONMENT` | Environment mode. Set to `development` for console logging, or omit for production JSON logging. | `production` |
 | `SKIP_TLS_VERIFICATION` | Optional convenience for connecting to Plex servers with self-signed or mismatched TLS certificates. When set to `true` the exporter (and the vendored Plex client) will skip TLS certificate verification for both HTTP and websocket connections. THIS IS INSECURE — only use in trusted networks or testing. Defaults to off. | `false` |
 | `TZ` | Optional timezone name (IANA location, e.g. `America/Chicago`) to use for log timestamps and any local time calculations. If unset the system local timezone is used. | `(system)` |
+| `PLEX_CLIENT_TIMEOUT_SECONDS` | HTTP client timeout when contacting the Plex server (seconds). Defaults to `10`. Set higher for slow LANs or when your Plex server takes longer to respond (mostly due to size). | `10` |
 
 Example `.env` file:
 
@@ -76,7 +77,6 @@ Example `.env` file:
 PLEX_SERVER=http://192.168.1.100:32400
 PLEX_TOKEN=abcd1234efgh5678
 TZ=America/Chicago
-LOG_FORMAT=console  # For human-readable logs during development
 ```
 
 ### Logging Configuration
