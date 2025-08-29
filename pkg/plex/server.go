@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,7 +78,7 @@ type Server struct {
 // pkg-level logger used for structured logs within this package. Tests and
 // callers may still pass their own logger to listeners; this logger is a
 // sensible default for package-level messages.
-var pkgLog = log.NewDevelopmentLogger()
+var pkgLog = log.DefaultLogger()
 
 // debugf logs only when server debug is enabled.
 func (s *Server) debugf(format string, args ...interface{}) {
@@ -137,8 +138,9 @@ func NewServer(serverURL, token string) (*Server, error) {
 		server.LibraryRefreshInterval = 15 * time.Minute
 	}
 
-	// Configure debug logging via DEBUG ("1" or "true")
-	if v := os.Getenv("DEBUG"); v == "1" || v == "true" {
+	// Configure debug behavior via LOG_LEVEL (debug|info|warn|error). If
+	// LOG_LEVEL=="debug" enable server debug features.
+	if v := os.Getenv("LOG_LEVEL"); strings.ToLower(v) == "debug" {
 		server.Debug = true
 	}
 

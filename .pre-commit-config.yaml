@@ -5,6 +5,7 @@ repos:
         name: gofmt
         entry: gofmt -s -w
         language: system
+        pass_filenames: true
         types: [go]
         files: '\.go$'
 

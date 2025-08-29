@@ -5,6 +5,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"io"
 	"os"
+	"strings"
 )
 
 // Logger defines a structured logging interface that wraps zap.Logger
@@ -53,6 +54,10 @@ func NewLogger(z *zap.Logger) Logger {
 // NewDevelopmentLogger creates a development logger with console output to stdout
 func NewDevelopmentLogger() Logger {
 	config := zap.NewDevelopmentConfig()
+	// Default to INFO level to avoid overly noisy logs; developers can
+	// explicitly enable DEBUG via env/log config when troubleshooting.
+	// Set log level from LOG_LEVEL env var (debug|info|warn|error).
+	config.Level = zap.NewAtomicLevelAt(logLevelFromEnv())
 	config.EncoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	config.OutputPaths = []string{"stdout"}      // Output to stdout for containers
@@ -64,7 +69,7 @@ func NewDevelopmentLogger() Logger {
 		logger = zap.New(zapcore.NewCore(
 			zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
 			zapcore.AddSync(os.Stdout), // Changed from os.Stderr
-			zapcore.DebugLevel,
+			logLevelFromEnv(),
 		))
 	}
 
@@ -106,6 +111,8 @@ func NewProductionLogger() Logger {
 	config := zap.NewProductionConfig()
 	config.OutputPaths = []string{"stdout"}      // Output to stdout for containers
 	config.ErrorOutputPaths = []string{"stderr"} // Errors still to stderr
+	// Allow log level override via LOG_LEVEL env var
+	config.Level = zap.NewAtomicLevelAt(logLevelFromEnv())
 
 	logger, err := config.Build()
 	if err != nil {
@@ -113,9 +120,37 @@ func NewProductionLogger() Logger {
 		logger = zap.New(zapcore.NewCore(
 			zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
 			zapcore.AddSync(os.Stdout), // Changed from os.Stderr
-			zapcore.InfoLevel,
+			logLevelFromEnv(),
 		))
 	}
 
 	return NewLogger(logger)
+}
+
+// DefaultLogger returns either the development (console) or production
+// (JSON) logger based on environment variables. Consumers can call this to
+// ensure package-level logs respect the same runtime configuration as
+// the main application. It checks LOG_FORMAT=="console" or
+// ENVIRONMENT=="development" to select the development logger.
+func DefaultLogger() Logger {
+	if os.Getenv("LOG_FORMAT") == "console" || os.Getenv("ENVIRONMENT") == "development" {
+		return NewDevelopmentLogger()
+	}
+	return NewProductionLogger()
+}
+
+func logLevelFromEnv() zapcore.Level {
+	level := os.Getenv("LOG_LEVEL")
+	switch strings.ToLower(level) {
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	case "warn":
+		return zapcore.WarnLevel
+	case "error":
+		return zapcore.ErrorLevel
+	default:
+		return zapcore.InfoLevel // Default level
+	}
 }

@@ -86,9 +86,9 @@ func main() {
 	} else {
 		libRefresh += " (minutes; 0 = disable caching)"
 	}
-	debugFlag := os.Getenv("DEBUG")
-	if debugFlag == "" {
-		debugFlag = "false"
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
 	}
 	skipTLS := os.Getenv("SKIP_TLS_VERIFICATION")
 	if skipTLS == "" {
@@ -99,7 +99,7 @@ func main() {
 		zap.String("PLEX_SERVER", serverAddress),
 		zap.String("PLEX_TOKEN", maskToken(plexToken)),
 		zap.String("LIBRARY_REFRESH_INTERVAL", libRefresh),
-		zap.String("DEBUG", debugFlag),
+		zap.String("LOG_LEVEL", logLevel),
 		zap.String("SKIP_TLS_VERIFICATION", skipTLS),
 		zap.String("TZ", tzResolved),
 	)
