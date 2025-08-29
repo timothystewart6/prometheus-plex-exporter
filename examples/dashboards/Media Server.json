@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -593,14 +593,13 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "TX and RX across all servers (bits/sec).",
+      "description": "Plex transmit bandwidth (bits/sec).",
       "fieldConfig": {
         "defaults": {
           "color": {
             "fixedColor": "blue",
             "mode": "thresholds"
           },
-          "links": [],
           "mappings": [],
           "min": 0,
           "thresholds": {
@@ -633,7 +632,7 @@
       "id": 4200,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "percentChangeColorMode": "standard",
@@ -641,7 +640,7 @@
           "calcs": [
             "last"
           ],
-          "fields": "/^(TX|RX)$/",
+          "fields": "/^TX$/",
           "values": false
         },
         "showPercentChange": false,
@@ -655,25 +654,13 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "8 * sum(rate(transmit_bytes_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "expr": "8 * sum(rate(transmit_bytes_total{job=~\"$job\", instance=~\"$instance\"}[45s]))",
           "format": "time_series",
-          "intervalFactor": 2,
           "legendFormat": "TX",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "editorMode": "code",
-          "expr": "8 * sum(rate(process_network_receive_bytes_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
-          "format": "time_series",
-          "intervalFactor": 2,
-          "legendFormat": "RX",
-          "refId": "B"
         }
       ],
-      "title": "Network Bandwidth (Total)",
+      "title": "Network TX",
       "type": "stat"
     },
     {
@@ -1976,5 +1963,5 @@
   "timezone": "browser",
   "title": "PPE Media Server",
   "uid": "426b8c74a8b8d5403b4b3a29656c8342",
-  "version": 16
+  "version": 6
 }
