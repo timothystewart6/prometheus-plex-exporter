@@ -16,3 +16,4 @@ linters:
     - gosec
     - gocritic
     - gocyclo
+

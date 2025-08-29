@@ -3,10 +3,8 @@ repos:
     hooks:
       - id: gofmt
         name: gofmt
-        # Format each passed Go file and re-stage it if it's not ignored.
-        entry: bash -c 'for f; do [ -e "$f" ] || continue; gofmt -s -w "$f"; if ! git check-ignore -q -- "$f"; then git add -- "$f"; fi; done' --
+        entry: gofmt -s -w
         language: system
-        pass_filenames: true
         types: [go]
         files: '\.go$'
 

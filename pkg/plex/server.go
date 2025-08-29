@@ -75,7 +75,19 @@ type Server struct {
 // pkg-level logger used for structured logs within this package. Tests and
 // callers may still pass their own logger to listeners; this logger is a
 // sensible default for package-level messages.
-var pkgLog = log.DefaultLogger()
+//
+// IMPORTANT: This logger gets refreshed in NewServer() via initLogger() to ensure
+// environment variables like LOG_LEVEL are properly respected, fixing a timing
+// issue where package initialization occurs before env vars are available.
+var pkgLog log.Logger = log.DefaultLogger()
+
+// initLogger initializes or updates the package logger based on current environment.
+// This ensures LOG_LEVEL and other environment variables are respected even when
+// the package is initialized before environment variables are fully loaded
+// (common in containerized environments).
+func initLogger() {
+	pkgLog = log.DefaultLogger()
+}
 
 // debugf logs only when server debug is enabled.  (Previously used for
 // verbose package-level debugging; removed to satisfy linter when unused.)
@@ -114,6 +126,12 @@ func NewServer(serverURL, token string) (*Server, error) {
 		Client:          client,
 		lastBandwidthAt: int(time.Now().Unix()),
 	}
+
+	// CRITICAL: Initialize logger based on current environment variables.
+	// This must be called here (not at package level) to ensure environment
+	// variables like LOG_LEVEL are available and properly respected. This fixes
+	// a timing issue where LOG_LEVEL=debug was ignored in containerized environments.
+	initLogger()
 
 	// Configure library refresh interval from environment variable
 	// LIBRARY_REFRESH_INTERVAL must be integer minutes (e.g. "15" for 15 minutes).

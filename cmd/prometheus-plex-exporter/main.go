@@ -23,7 +23,12 @@ const (
 )
 
 var (
-	logger = createLogger()
+	// logger is intentionally not initialized at package level to avoid timing issues.
+	// In containerized environments, environment variables (especially from .env files)
+	// may not be available during package initialization, but are guaranteed to be
+	// available when main() executes. We initialize this in main() to ensure
+	// LOG_LEVEL and other env vars are properly read for logger configuration.
+	logger log.Logger
 )
 
 // createLogger creates the appropriate logger based on environment
@@ -50,6 +55,12 @@ func maskToken(t string) string {
 }
 
 func main() {
+	// CRITICAL: Initialize logger first to ensure environment variables are fully loaded.
+	// This fixes a timing issue where package-level logger initialization occurs before
+	// container environment variables (including .env files) are available, causing
+	// LOG_LEVEL=debug and similar settings to be ignored.
+	logger = createLogger()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
 	serverAddress := os.Getenv("PLEX_SERVER")
