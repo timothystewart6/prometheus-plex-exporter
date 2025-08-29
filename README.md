@@ -65,6 +65,8 @@ You can supply environment variables via your container runtime, `docker run -e 
 | `PLEX_TOKEN` | [Plex authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) used to authenticate with your Plex server (required) | `(required)` |
 | `LIBRARY_REFRESH_INTERVAL` | How often to re-query expensive per-library counts (music tracks, episode counts, and library items) in minutes. Must be an integer number of minutes. Defaults to `15` when unset. Set to `0` to disable caching and always re-query. | `15` |
 | `DEBUG` | Enable verbose debug logging. Set to `true` to turn on debug-level logs (useful for troubleshooting). Defaults to off. | `false` |
+| `LOG_FORMAT` | Log output format. Set to `console` for human-readable logs (development), or omit for structured JSON logs (production/containers). | `json` |
+| `ENVIRONMENT` | Environment mode. Set to `development` for console logging, or omit for production JSON logging. | `production` |
 | `SKIP_TLS_VERIFICATION` | Optional convenience for connecting to Plex servers with self-signed or mismatched TLS certificates. When set to `true` the exporter (and the vendored Plex client) will skip TLS certificate verification for both HTTP and websocket connections. THIS IS INSECURE — only use in trusted networks or testing. Defaults to off. | `false` |
 | `TZ` | Optional timezone name (IANA location, e.g. `America/Chicago`) to use for log timestamps and any local time calculations. If unset the system local timezone is used. | `(system)` |
 
@@ -74,7 +76,29 @@ Example `.env` file:
 PLEX_SERVER=http://192.168.1.100:32400
 PLEX_TOKEN=abcd1234efgh5678
 TZ=America/Chicago
+LOG_FORMAT=console  # For human-readable logs during development
 ```
+
+### Logging Configuration
+
+The exporter defaults to **structured JSON logging** (ideal for containers and log aggregation systems like ELK, Grafana Loki, or cloud logging). For local development, you can switch to human-readable console logs:
+
+**Production/Container Logging** (default):
+
+```json
+{"level":"info","ts":1724885215.123,"msg":"starting exporter","PLEX_SERVER":"https://plex.local:32400"}
+```
+
+**Development/Console Logging**:
+
+```text
+2025-08-28T19:20:15.123-0500    INFO    starting exporter    PLEX_SERVER=https://plex.local:32400
+```
+
+To enable console logging, set either:
+
+- `LOG_FORMAT=console`
+- `ENVIRONMENT=development`
 
 Startup note:
 

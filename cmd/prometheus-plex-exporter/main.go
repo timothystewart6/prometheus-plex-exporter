@@ -23,8 +23,18 @@ const (
 )
 
 var (
-	logger = log.NewDevelopmentLogger()
+	logger = createLogger()
 )
+
+// createLogger creates the appropriate logger based on environment
+func createLogger() log.Logger {
+	// Use development logging when explicitly requested (better for local dev)
+	if os.Getenv("LOG_FORMAT") == "console" || os.Getenv("ENVIRONMENT") == "development" {
+		return log.NewDevelopmentLogger()
+	}
+	// Default to production JSON logger (better for containers and log aggregation)
+	return log.NewProductionLogger()
+}
 
 // maskToken returns a masked representation of the token suitable for logs.
 // It preserves the last 4 characters when possible and replaces the rest with '*'.

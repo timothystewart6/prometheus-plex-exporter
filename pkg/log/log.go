@@ -50,18 +50,20 @@ func NewLogger(z *zap.Logger) Logger {
 	return &zapLogger{z}
 }
 
-// NewDevelopmentLogger creates a development logger similar to the old go-kit format
+// NewDevelopmentLogger creates a development logger with console output to stdout
 func NewDevelopmentLogger() Logger {
 	config := zap.NewDevelopmentConfig()
 	config.EncoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	config.OutputPaths = []string{"stdout"}      // Output to stdout for containers
+	config.ErrorOutputPaths = []string{"stderr"} // Errors still to stderr
 
 	logger, err := config.Build()
 	if err != nil {
 		// Fallback to a simple logger if config fails
 		logger = zap.New(zapcore.NewCore(
 			zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
-			zapcore.AddSync(os.Stderr),
+			zapcore.AddSync(os.Stdout), // Changed from os.Stderr
 			zapcore.DebugLevel,
 		))
 	}
@@ -99,14 +101,18 @@ func NewTestLogger(writer io.Writer) Logger {
 	return NewLogger(logger)
 }
 
-// NewProductionLogger creates a production logger with JSON output
+// NewProductionLogger creates a production logger with JSON output to stdout
 func NewProductionLogger() Logger {
-	logger, err := zap.NewProduction()
+	config := zap.NewProductionConfig()
+	config.OutputPaths = []string{"stdout"}      // Output to stdout for containers
+	config.ErrorOutputPaths = []string{"stderr"} // Errors still to stderr
+
+	logger, err := config.Build()
 	if err != nil {
 		// Fallback to a simple logger if config fails
 		logger = zap.New(zapcore.NewCore(
 			zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-			zapcore.AddSync(os.Stderr),
+			zapcore.AddSync(os.Stdout), // Changed from os.Stderr
 			zapcore.InfoLevel,
 		))
 	}
