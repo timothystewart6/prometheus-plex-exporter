@@ -127,3 +127,39 @@ func (c *Client) GetWithHeaders(path string, data any, headers map[string]string
 
 	return c.Do(req, data)
 }
+
+// GetWithHeadersReturnHeaders performs a GET with additional request headers,
+// decodes the response into data and returns the response headers (copied)
+// so callers can read values like x-plex-container-total-size without
+// needing to access the raw http.Response.
+func (c *Client) GetWithHeadersReturnHeaders(path string, data any, headers map[string]string) (http.Header, error) {
+	req, err := c.NewRequest("GET", path)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == 404 {
+		return resp.Header.Clone(), ErrNotFound
+	}
+
+	if data != nil {
+		dec := json.NewDecoder(resp.Body)
+		if err := dec.Decode(data); err != nil {
+			return resp.Header.Clone(), err
+		}
+	}
+
+	return resp.Header.Clone(), nil
+}

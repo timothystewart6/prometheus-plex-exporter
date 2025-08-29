@@ -281,12 +281,24 @@ func (s *Server) ensureLibraryItemsCount(lib *Library) {
 				candidates = append(candidates, t)
 			}
 		}
-		headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
+		headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "1"}
 		found := false
 		for _, trackType := range candidates {
 			path := "/library/sections/" + lib.ID + "/all?type=" + trackType
-			if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
-				lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+			hdrs, err := s.Client.GetWithHeadersReturnHeaders(path, &sizeOnly, headers)
+			if err == nil {
+				// prefer header x-plex-container-total-size
+				if v := hdrs.Get("x-plex-container-total-size"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil {
+						lib.ItemsCount = int64(n)
+					}
+				}
+				// fallback to MediaContainer.totalSize or size in body
+				if lib.ItemsCount == 0 {
+					if sizeOnly.MediaContainer.Size > 0 {
+						lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+					}
+				}
 				s.mtx.Lock()
 				for _, l := range s.libraries {
 					if l.ID == lib.ID {
@@ -308,11 +320,18 @@ func (s *Server) ensureLibraryItemsCount(lib *Library) {
 		}
 	}
 
-	// fallback generic items count
+	// fallback generic items count (request page size 1 and prefer header)
 	path := "/library/sections/" + lib.ID + "/all"
-	headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "0"}
-	if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
-		lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+	headers := map[string]string{"X-Plex-Container-Start": "0", "X-Plex-Container-Size": "1"}
+	if hdrs, err := s.Client.GetWithHeadersReturnHeaders(path, &sizeOnly, headers); err == nil {
+		if v := hdrs.Get("x-plex-container-total-size"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				lib.ItemsCount = int64(n)
+			}
+		}
+		if lib.ItemsCount == 0 {
+			lib.ItemsCount = int64(sizeOnly.MediaContainer.Size)
+		}
 		if s.LibraryRefreshInterval > 0 {
 			s.mtx.Lock()
 			for _, l := range s.libraries {
@@ -485,18 +504,28 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 					}
 					headers := map[string]string{
 						"X-Plex-Container-Start": "0",
-						"X-Plex-Container-Size":  "0",
+						"X-Plex-Container-Size":  "1",
 					}
-					if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
+					if hdrs, err := s.Client.GetWithHeadersReturnHeaders(path, &sizeOnly, headers); err == nil {
+						// prefer header
+						var count int64
+						if v := hdrs.Get("x-plex-container-total-size"); v != "" {
+							if n, err := strconv.Atoi(v); err == nil {
+								count = int64(n)
+							}
+						}
+						if count == 0 {
+							count = int64(sizeOnly.MediaContainer.Size)
+						}
 						mu.Lock()
-						episodesTotal += int64(sizeOnly.MediaContainer.Size)
+						episodesTotal += count
 						mu.Unlock()
 
 						if s.LibraryRefreshInterval > 0 {
 							s.mtx.Lock()
 							for _, l := range s.libraries {
 								if l.ID == sectionID {
-									l.lastEpisodeCount = int64(sizeOnly.MediaContainer.Size)
+									l.lastEpisodeCount = count
 									l.lastEpisodeFetch = time.Now().Unix()
 									break
 								}
@@ -558,18 +587,28 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 						path := "/library/sections/" + sectionID + "/all?type=" + trackType
 						headers := map[string]string{
 							"X-Plex-Container-Start": "0",
-							"X-Plex-Container-Size":  "0",
+							"X-Plex-Container-Size":  "1",
 						}
-						if err := s.Client.GetWithHeaders(path, &sizeOnly, headers); err == nil {
-							if sizeOnly.MediaContainer.Size > 0 {
-								trackCount = int64(sizeOnly.MediaContainer.Size)
+						if hdrs, err := s.Client.GetWithHeadersReturnHeaders(path, &sizeOnly, headers); err == nil {
+							// prefer header
+							var count int
+							if v := hdrs.Get("x-plex-container-total-size"); v != "" {
+								if n, err := strconv.Atoi(v); err == nil {
+									count = n
+								}
+							}
+							if count == 0 {
+								count = sizeOnly.MediaContainer.Size
+							}
+							if count > 0 {
+								trackCount = int64(count)
 								s.mtx.Lock()
 								for _, l := range s.libraries {
 									if l.ID == sectionID {
 										l.cachedTrackType = trackType
 										if s.LibraryRefreshInterval > 0 {
 											l.lastMusicFetch = time.Now().Unix()
-											l.lastMusicCount = int64(sizeOnly.MediaContainer.Size)
+											l.lastMusicCount = int64(count)
 										}
 										break
 									}
