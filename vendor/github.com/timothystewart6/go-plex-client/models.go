@@ -243,6 +243,7 @@ type SearchResultsEpisode struct {
 	MediaContainer MediaContainer `json:"MediaContainer"`
 }
 
+//nolint:unused
 type plexResponse struct {
 	Children []struct {
 		ElementType string `json:"_elementType"`
@@ -283,6 +284,7 @@ type plexResponse struct {
 	Version                       string `json:"version"`
 }
 
+//nolint:unused
 type killTranscodeResponse struct {
 	Children []struct {
 		ElementType   string  `json:"_elementType"`
@@ -579,6 +581,7 @@ type resourcesResponse struct {
 	Device  []PMSDevices `xml:"Device"`
 }
 
+//nolint:unused
 type terminateSessionResponse struct {
 	XMLName xml.Name `xml:"MediaContainer"`
 	Size    int      `xml:"size,attr"`
@@ -881,6 +884,7 @@ type headers struct {
 	TargetClientIdentifier string
 }
 
+//nolint:unused
 type request struct {
 	headers
 }

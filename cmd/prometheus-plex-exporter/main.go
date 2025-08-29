@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	kitlog "github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 
+	"github.com/grafana/plexporter/pkg/log"
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/grafana/plexporter/pkg/plex"
 )
@@ -23,7 +23,7 @@ const (
 )
 
 var (
-	log = kitlog.NewLogfmtLogger(kitlog.NewSyncWriter(os.Stderr))
+	logger = log.NewDevelopmentLogger()
 )
 
 // maskToken returns a masked representation of the token suitable for logs.
@@ -44,14 +44,14 @@ func main() {
 
 	serverAddress := os.Getenv("PLEX_SERVER")
 	if serverAddress == "" {
-		_ = level.Error(log).Log("msg", "PLEX_SERVER environment variable must be specified")
+		logger.Error("PLEX_SERVER environment variable must be specified")
 		cancel()
 		os.Exit(1)
 	}
 
 	plexToken := os.Getenv("PLEX_TOKEN")
 	if plexToken == "" {
-		_ = level.Error(log).Log("msg", "PLEX_TOKEN environment variable must be specified")
+		logger.Error("PLEX_TOKEN environment variable must be specified")
 		cancel()
 		os.Exit(1)
 	}
@@ -61,7 +61,7 @@ func main() {
 	tzResolved := "(system)"
 	if tzEnv != "" {
 		if loc, err := time.LoadLocation(tzEnv); err != nil {
-			_ = level.Warn(log).Log("msg", "invalid TZ, using system default", "TZ", tzEnv, "error", err)
+			logger.Warn("invalid TZ, using system default", zap.String("TZ", tzEnv), zap.Error(err))
 			tzResolved = "invalid: " + tzEnv
 		} else {
 			time.Local = loc
@@ -85,19 +85,18 @@ func main() {
 		skipTLS = "false"
 	}
 
-	_ = level.Info(log).Log(
-		"msg", "starting exporter",
-		"PLEX_SERVER", serverAddress,
-		"PLEX_TOKEN", maskToken(plexToken),
-		"LIBRARY_REFRESH_INTERVAL", libRefresh,
-		"DEBUG", debugFlag,
-		"SKIP_TLS_VERIFICATION", skipTLS,
-		"TZ", tzResolved,
+	logger.Info("starting exporter",
+		zap.String("PLEX_SERVER", serverAddress),
+		zap.String("PLEX_TOKEN", maskToken(plexToken)),
+		zap.String("LIBRARY_REFRESH_INTERVAL", libRefresh),
+		zap.String("DEBUG", debugFlag),
+		zap.String("SKIP_TLS_VERIFICATION", skipTLS),
+		zap.String("TZ", tzResolved),
 	)
 
 	server, err := plex.NewServer(serverAddress, plexToken)
 	if err != nil {
-		_ = level.Error(log).Log("msg", "cannot initialize connection to plex server", "error", err)
+		logger.Error("cannot initialize connection to plex server", zap.Error(err))
 		os.Exit(1)
 	}
 
@@ -114,24 +113,24 @@ func main() {
 	}
 
 	go func() {
-		_ = level.Info(log).Log("msg", "starting metrics server on "+MetricsServerAddr)
+		logger.Info("starting metrics server on " + MetricsServerAddr)
 		err = metricsServer.ListenAndServe()
 		if !errors.Is(err, http.ErrServerClosed) {
-			_ = level.Error(log).Log("msg", "cannot start metrics server", "error", err)
+			logger.Error("cannot start metrics server", zap.Error(err))
 		}
 	}()
 
 	exitCode := 0
-	err = server.Listen(ctx, log)
+	err = server.Listen(ctx, logger)
 	if err != nil {
-		_ = level.Error(log).Log("msg", "cannot listen to plex server events", "error", err)
+		logger.Error("cannot listen to plex server events", zap.Error(err))
 		exitCode = 1
 	}
 
-	_ = level.Debug(log).Log("msg", "shutting down metrics server")
+	logger.Debug("shutting down metrics server")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-		_ = level.Error(log).Log("msg", "cannot gracefully shutdown metrics server", "error", err)
+		logger.Error("cannot gracefully shutdown metrics server", zap.Error(err))
 	}
 
 	// ensure shutdown cancel is called before exiting so any resources are

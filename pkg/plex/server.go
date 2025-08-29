@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	kitlog "github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"go.uber.org/zap"
 
+	"github.com/grafana/plexporter/pkg/log"
 	"github.com/grafana/plexporter/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -77,12 +77,12 @@ type Server struct {
 // pkg-level logger used for structured logs within this package. Tests and
 // callers may still pass their own logger to listeners; this logger is a
 // sensible default for package-level messages.
-var pkgLog = kitlog.NewLogfmtLogger(kitlog.NewSyncWriter(os.Stderr))
+var pkgLog = log.NewDevelopmentLogger()
 
 // debugf logs only when server debug is enabled.
 func (s *Server) debugf(format string, args ...interface{}) {
 	if s != nil && s.Debug {
-		_ = level.Debug(pkgLog).Log("msg", fmt.Sprintf(format, args...))
+		pkgLog.Debug(fmt.Sprintf(format, args...))
 	}
 }
 
@@ -128,7 +128,9 @@ func NewServer(serverURL, token string) (*Server, error) {
 		if mins, err := strconv.Atoi(v); err == nil && mins >= 0 {
 			server.LibraryRefreshInterval = time.Duration(mins) * time.Minute
 		} else {
-			_ = level.Warn(pkgLog).Log("msg", "invalid LIBRARY_REFRESH_INTERVAL", "value", v, "note", "expected integer minutes (e.g. 15); falling back to default 15 minutes")
+			pkgLog.Warn("invalid LIBRARY_REFRESH_INTERVAL",
+				zap.String("value", v),
+				zap.String("note", "expected integer minutes (e.g. 15); falling back to default 15 minutes"))
 		}
 	} else {
 		// default to 15 minutes when not set
@@ -142,9 +144,10 @@ func NewServer(serverURL, token string) (*Server, error) {
 
 	// Log effective interval; if 0 then caching is disabled
 	if server.LibraryRefreshInterval == 0 {
-		_ = level.Info(pkgLog).Log("msg", "Library refresh interval disabled; caching is off")
+		pkgLog.Info("Library refresh interval disabled; caching is off")
 	} else {
-		_ = level.Info(pkgLog).Log("msg", "Library refresh interval set", "minutes", int(server.LibraryRefreshInterval.Minutes()))
+		pkgLog.Info("Library refresh interval set",
+			zap.Int("minutes", int(server.LibraryRefreshInterval.Minutes())))
 	}
 
 	// Perform a fast, lightweight refresh at startup to populate basic
@@ -170,11 +173,11 @@ func NewServer(serverURL, token string) (*Server, error) {
 		}
 		time.Sleep(time.Duration(delaySec+jitter) * time.Second)
 
-		_ = level.Info(pkgLog).Log("msg", "Starting background full library refresh")
+		pkgLog.Info("Starting background full library refresh")
 		if err := server.Refresh(); err != nil {
-			_ = level.Error(pkgLog).Log("msg", "background full refresh failed", "err", err)
+			pkgLog.Error("background full refresh failed", zap.Error(err))
 		} else {
-			_ = level.Info(pkgLog).Log("msg", "background full library refresh completed")
+			pkgLog.Info("background full library refresh completed")
 		}
 		close(server.fullRefreshDone)
 	}()
@@ -252,7 +255,10 @@ func (s *Server) Refresh() error {
 				}
 				s.debugf("Library %s (ID: %s) has %d items", lib.Name, lib.ID, results.MediaContainer.Size)
 			} else {
-				_ = level.Error(pkgLog).Log("msg", "Error fetching items for library", "library", lib.Name, "id", lib.ID, "err", err)
+				pkgLog.Error("Error fetching items for library",
+					zap.String("library", lib.Name),
+					zap.String("id", lib.ID),
+					zap.Error(err))
 			}
 		}
 	}
@@ -449,7 +455,9 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 							s.mtx.Unlock()
 						}
 					} else {
-						_ = level.Error(pkgLog).Log("msg", "Error fetching episodes for section", "section", sectionID, "err", err)
+						pkgLog.Error("Error fetching episodes for section",
+							zap.String("section", sectionID),
+							zap.Error(err))
 					}
 				}
 			}(lib.ID)
@@ -513,7 +521,10 @@ func (s *Server) computeLibraryCounts(newLibraries []*Library) (moviesTotal, epi
 								break
 							}
 						} else {
-							_ = level.Error(pkgLog).Log("msg", "Error fetching music tracks", "type", trackType, "section", sectionID, "err", err)
+							pkgLog.Error("Error fetching music tracks",
+								zap.String("type", trackType),
+								zap.String("section", sectionID),
+								zap.Error(err))
 						}
 					}
 				}

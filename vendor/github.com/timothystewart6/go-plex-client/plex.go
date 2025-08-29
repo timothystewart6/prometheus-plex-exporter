@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 var (
@@ -202,11 +202,7 @@ func SignIn(username, password string) (*Plex, error) {
 		return &Plex{}, err
 	}
 
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log the error but don't override the main error
-		}
-	}()
+	defer safeClose(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		return &Plex{}, errors.New(resp.Status)
@@ -244,11 +240,7 @@ func (p *Plex) Search(title string) (SearchResults, error) {
 		return SearchResults{}, fmt.Errorf(ErrorServer, resp.Status)
 	}
 
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log the error but don't override the main error
-		}
-	}()
+	defer safeClose(resp.Body)
 
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		return SearchResults{}, err
@@ -279,11 +271,7 @@ func (p *Plex) GetMetadata(key string) (MediaMetadata, error) {
 		return results, fmt.Errorf(ErrorServer, resp.Status)
 	}
 
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log the error but don't override the main error
-		}
-	}()
+	defer safeClose(resp.Body)
 
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		return results, err
@@ -313,11 +301,7 @@ func (p *Plex) GetMetadataChildren(key string) (MetadataChildren, error) {
 		return MetadataChildren{}, errors.New(ErrorNotAuthorized)
 	}
 
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log the error but don't override the main error
-		}
-	}()
+	defer safeClose(resp.Body)
 
 	var results MetadataChildren
 
@@ -466,11 +450,7 @@ func (p *Plex) Download(meta Metadata, path string, createFolders bool, skipIfEx
 			if err != nil {
 				return err
 			}
-			defer func() {
-				if closeErr := out.Close(); closeErr != nil {
-					// Log the error but don't override the main error
-				}
-			}()
+			defer safeClose(out)
 
 			_, err = io.Copy(out, resp.Body)
 
@@ -640,7 +620,13 @@ func (p *Plex) GetFriends() ([]Friends, error) {
 
 	var plexFriendsResp friendsResponse
 
-	query := plexURL + "/api/users"
+	// Prefer the instance URL if set (testability / local servers). Fall back to plex.tv.
+	base := plexURL
+	if p.URL != "" {
+		base = p.URL
+	}
+
+	query := base + "/api/users"
 
 	newHeaders := p.Headers
 
@@ -660,15 +646,8 @@ func (p *Plex) GetFriends() ([]Friends, error) {
 		return []Friends{}, fmt.Errorf(ErrorServerReplied, resp.StatusCode)
 	}
 
-	respBytes, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		return []Friends{}, err
-	}
-
-	err = xml.Unmarshal(respBytes, &plexFriendsResp)
-
-	if err != nil {
+	// Stream-decode the XML response to avoid buffering the entire body into memory.
+	if err := xml.NewDecoder(resp.Body).Decode(&plexFriendsResp); err != nil {
 		return []Friends{}, err
 	}
 
@@ -965,7 +944,7 @@ func (p *Plex) GetDevices() ([]PMSDevices, error) {
 	}
 
 	if err := xml.NewDecoder(resp.Body).Decode(result); err != nil {
-		fmt.Println(err.Error())
+		logger.Error("failed to decode devices response", zap.String("error", err.Error()))
 
 		return []PMSDevices{}, err
 	}
@@ -1019,7 +998,7 @@ func (p *Plex) GetServersInfo() (ServerInfo, error) {
 	result := ServerInfo{}
 
 	if err := xml.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Println(err.Error())
+		logger.Error("failed to decode servers info response", zap.String("error", err.Error()))
 
 		return ServerInfo{}, err
 	}
@@ -1074,7 +1053,7 @@ func (p *Plex) GetSections(machineID string) ([]ServerSections, error) {
 	var result SectionIDResponse
 
 	if err := xml.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Println(err.Error())
+		logger.Error("failed to decode sections response", zap.String("error", err.Error()))
 
 		return []ServerSections{}, err
 	}
@@ -1111,7 +1090,7 @@ func (p *Plex) GetLibraries() (LibrarySections, error) {
 	var result LibrarySections
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Println(err.Error())
+		logger.Error("failed to decode libraries response", zap.String("error", err.Error()))
 
 		return LibrarySections{}, err
 	}
@@ -1304,7 +1283,7 @@ func (p *Plex) GetLibraryLabels(sectionKey, sectionIndex string) (LibraryLabels,
 	var result LibraryLabels
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Println(err.Error())
+		logger.Error("failed to decode library labels response", zap.String("error", err.Error()))
 
 		return LibraryLabels{}, err
 	}

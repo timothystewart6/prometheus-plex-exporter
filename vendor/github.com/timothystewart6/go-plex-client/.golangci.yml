@@ -4,11 +4,10 @@ run:
   timeout: 5m
 
 linters:
-  disable:
-    - errcheck      # Too many false positives, especially in test files
-    - unused        # Some code kept for future use
-    - ineffassign   # Some assignments for debugging
-    - staticcheck   # Static analysis issues addressed separately
-    - gosec         # Security issues addressed separately
-    - gocritic      # Code criticism addressed separately  
-    - gocyclo       # Complexity addressed separately
+  enable-all: true
+
+  disable: []
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15

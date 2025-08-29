@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/gorilla/websocket"
 	"github.com/timothystewart6/go-plex-client"
+	"go.uber.org/zap"
+
+	"github.com/grafana/plexporter/pkg/log"
 )
 
 var (
@@ -65,7 +66,7 @@ type plexListener struct {
 	log            log.Logger
 }
 
-func (s *Server) Listen(ctx context.Context, log log.Logger) error {
+func (s *Server) Listen(ctx context.Context, logger log.Logger) error {
 	s.mtx.Lock()
 	if s.listener != nil {
 		s.mtx.Unlock()
@@ -82,7 +83,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 		server:         s,
 		conn:           conn,
 		activeSessions: NewSessions(ctx, s),
-		log:            log,
+		log:            logger,
 	}
 
 	s.mtx.Unlock()
@@ -116,7 +117,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 				return
 			}
 		}
-		_ = level.Error(log).Log("msg", "error in websocket processing", "err", err)
+		logger.Error("error in websocket processing", zap.Error(err))
 
 		// Try to send error, but don't panic if channel is closed
 		select {
@@ -143,7 +144,7 @@ func (s *Server) Listen(ctx context.Context, log log.Logger) error {
 		// noop
 	}
 
-	_ = level.Info(log).Log("msg", "Successfully connected", "machineID", s.ID, "server", s.Name)
+	logger.Info("Successfully connected", zap.String("machineID", s.ID), zap.String("server", s.Name))
 
 	return <-doneChan
 }
@@ -171,12 +172,11 @@ func (l *plexListener) onPlayingHandler(c plex.NotificationContainer) {
 			states = append(states, n.State)
 		}
 
-		_ = level.Error(l.log).Log(
-			"msg", "error handling OnPlaying event",
-			"sessionKeys", strings.Join(sessionKeys, ","),
-			"ratingKeys", strings.Join(ratingKeys, ","),
-			"states", strings.Join(states, ","),
-			"err", err,
+		l.log.Error("error handling OnPlaying event",
+			zap.String("sessionKeys", strings.Join(sessionKeys, ",")),
+			zap.String("ratingKeys", strings.Join(ratingKeys, ",")),
+			zap.String("states", strings.Join(states, ",")),
+			zap.Error(err),
 		)
 	}
 }
@@ -194,7 +194,9 @@ func (l *plexListener) onTimelineHandler(c plex.NotificationContainer) {
 		summaries = append(summaries, fmt.Sprintf("id=%s item=%d title=%s section=%d state=%d", te.Identifier, te.ItemID, te.Title, te.SectionID, te.State))
 	}
 
-	_ = level.Info(l.log).Log("msg", "timeline entries", "count", len(c.TimelineEntry), "entries", strings.Join(summaries, " | "))
+	l.log.Info("timeline entries",
+		zap.Int("count", len(c.TimelineEntry)),
+		zap.String("entries", strings.Join(summaries, " | ")))
 }
 
 // onTranscodeUpdateHandler receives TranscodeSession updates and logs a concise
@@ -241,7 +243,10 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 			}
 		}
 
-		_ = level.Info(l.log).Log("msg", "transcode session update", "sessionKey", ts.Key, "type", kind, "subtitle", subtitle)
+		l.log.Info("transcode session update",
+			zap.String("sessionKey", ts.Key),
+			zap.String("type", kind),
+			zap.String("subtitle", subtitle))
 
 		if l.activeSessions == nil {
 			continue
@@ -312,12 +317,19 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 
 				// Only log warning if there are actual active sessions to show
 				if len(ssum) > 0 {
-					_ = level.Warn(l.log).Log("msg", "transcode update did not match any active session", "tsKey", ts.Key, "detectedKind", kind, "knownSessions", strings.Join(ssum, "; "))
+					l.log.Warn("transcode update did not match any active session",
+						zap.String("tsKey", ts.Key),
+						zap.String("detectedKind", kind),
+						zap.String("knownSessions", strings.Join(ssum, "; ")))
 				} else {
-					_ = level.Debug(l.log).Log("msg", "transcode update for session not currently active", "tsKey", ts.Key, "detectedKind", kind)
+					l.log.Debug("transcode update for session not currently active",
+						zap.String("tsKey", ts.Key),
+						zap.String("detectedKind", kind))
 				}
 			} else {
-				_ = level.Warn(l.log).Log("msg", "transcode update did not match and activeSessions is nil", "tsKey", ts.Key, "detectedKind", kind)
+				l.log.Warn("transcode update did not match and activeSessions is nil",
+					zap.String("tsKey", ts.Key),
+					zap.String("detectedKind", kind))
 			}
 
 			if tcs, err := l.conn.GetTranscodeSessions(); err == nil {
@@ -325,7 +337,8 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 				for _, t := range tcs.Children {
 					tsum = append(tsum, fmt.Sprintf("k=%s video=%s audio=%s decision=%s", t.Key, t.VideoCodec, t.AudioCodec, t.VideoDecision))
 				}
-				_ = level.Warn(l.log).Log("msg", "active transcode sessions", "list", strings.Join(tsum, "; "))
+				l.log.Warn("active transcode sessions",
+					zap.String("list", strings.Join(tsum, "; ")))
 
 				for _, t := range tcs.Children {
 					match := false
@@ -373,7 +386,9 @@ func (l *plexListener) onTranscodeUpdateHandler(c plex.NotificationContainer) {
 					}
 
 					if subFromAPI != "" {
-						_ = level.Info(l.log).Log("msg", "derived subtitle action from transcode sessions API", "tsKey", t.Key, "subtitle", subFromAPI)
+						l.log.Info("derived subtitle action from transcode sessions API",
+							zap.String("tsKey", t.Key),
+							zap.String("subtitle", subFromAPI))
 					}
 
 					// apply to sessions (prefer TrySet, but create if necessary)
@@ -437,13 +452,18 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 				if s2, err := l.conn.GetSessions(); err == nil {
 					session = getSessionByID(s2, n.SessionKey)
 				} else {
-					_ = level.Debug(l.log).Log("msg", "retrying GetSessions failed", "attempt", attempt, "err", err)
+					l.log.Debug("retrying GetSessions failed",
+						zap.Int("attempt", attempt),
+						zap.Error(err))
 				}
 			}
 		}
 
 		if session == nil {
-			_ = level.Warn(l.log).Log("msg", "session not found for notification after retries, skipping", "SessionKey", n.SessionKey, "RatingKey", n.RatingKey, "state", n.State)
+			l.log.Warn("session not found for notification after retries, skipping",
+				zap.String("SessionKey", n.SessionKey),
+				zap.String("RatingKey", n.RatingKey),
+				zap.String("state", n.State))
 			continue
 		}
 
@@ -463,12 +483,15 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		}
 
 		if metaErr != nil {
-			_ = level.Error(l.log).Log("msg", "error fetching metadata for notification after retries, skipping", "RatingKey", n.RatingKey, "err", metaErr)
+			l.log.Error("error fetching metadata for notification after retries, skipping",
+				zap.String("RatingKey", n.RatingKey),
+				zap.Error(metaErr))
 			continue
 		}
 
 		if len(metadata.MediaContainer.Metadata) == 0 {
-			_ = level.Warn(l.log).Log("msg", "metadata response empty after retries, skipping", "RatingKey", n.RatingKey)
+			l.log.Warn("metadata response empty after retries, skipping",
+				zap.String("RatingKey", n.RatingKey))
 			continue
 		}
 
@@ -476,15 +499,15 @@ func (l *plexListener) onPlaying(c plex.NotificationContainer) error {
 		// and structured. Always update sessions for every notification.
 		if i == 0 {
 			batchCount := len(c.PlaySessionStateNotification)
-			_ = level.Info(l.log).Log("msg", "Received PlaySessionStateNotification",
-				"SessionKey", n.SessionKey,
-				"userName", session.User.Title,
-				"userID", session.User.ID,
-				"state", n.State,
-				"mediaTitle", metadata.MediaContainer.Metadata[0].Title,
-				"mediaID", metadata.MediaContainer.Metadata[0].RatingKey,
-				"timestamp", time.Duration(time.Millisecond)*time.Duration(n.ViewOffset),
-				"batchCount", batchCount,
+			l.log.Info("Received PlaySessionStateNotification",
+				zap.String("SessionKey", n.SessionKey),
+				zap.String("userName", session.User.Title),
+				zap.String("userID", session.User.ID),
+				zap.String("state", n.State),
+				zap.String("mediaTitle", metadata.MediaContainer.Metadata[0].Title),
+				zap.String("mediaID", metadata.MediaContainer.Metadata[0].RatingKey),
+				zap.Duration("timestamp", time.Duration(time.Millisecond)*time.Duration(n.ViewOffset)),
+				zap.Int("batchCount", batchCount),
 			)
 		}
 
